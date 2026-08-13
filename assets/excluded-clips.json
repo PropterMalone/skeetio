@@ -7,15 +7,18 @@
   "held": [
     {
       "identifier": "stripper_variety_girls",
-      "reason": "adult (burlesque)"
+      "reason": "adult (burlesque)",
+      "decision": "excluded permanently (2026-08-13) \u2014 a stranger's face and handle over this footage is not defensible after the fact"
     },
     {
       "identifier": "AfroMood",
-      "reason": "adult (nudie series)"
+      "reason": "adult (nudie series)",
+      "decision": "excluded permanently (2026-08-13) \u2014 a stranger's face and handle over this footage is not defensible after the fact"
     },
     {
       "identifier": "panorama_ephemera2004",
-      "reason": "licence CC BY-NC-SA 4.0, not public domain"
+      "reason": "licence CC BY-NC-SA 4.0, not public domain",
+      "decision": "settled by licence policy, not judgment \u2014 the renderer refuses non-public-domain clips"
     }
   ]
 }
