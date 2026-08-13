@@ -11,7 +11,11 @@ Scoring streams a handful of frames directly off archive.org with ffmpeg's HTTP
 seek, so vetting a hundred candidates costs a few megabytes rather than a few
 gigabytes of downloads.
 
-    python3 render/curate.py --collection prelinger --rows 60 --out assets/broll.json
+    python3 render/curate.py --collection prelinger --rows 60 --out assets/broll-prelinger.json
+
+The output name is not free: pair.load() globs `assets/broll-*.json`, so a
+catalogue written to `broll.json` is curated, reported as a success, and then
+silently ignored by every render.
 """
 
 from __future__ import annotations
@@ -79,11 +83,12 @@ HOLD = _re.compile(
     _re.I | _re.X,
 )
 
-# Licences the Internet Archive records that genuinely permit unrestricted
-# reuse. Every rendered frame stamps "public domain", so a clip whose licence
-# does not actually say that makes the credit line assert a false legal fact —
-# and an NC term is wrong for a monetised channel specifically.
-PUBLIC_DOMAIN = ("publicdomain", "public-domain", "cc0", "mark/1.0", "zero/1.0")
+# The licence rule now lives in broll (`broll.is_public_domain`), next to the
+# credit line that makes the claim — screening the pool here is not enough on
+# its own, because --clip takes any identifier and never passes through
+# curation. Referenced rather than restated so the two cannot drift apart.
+# NC is wrong for a monetised channel specifically, which is why "some licence"
+# is not the bar.
 
 
 def _mp4_url(identifier: str) -> tuple[str, dict]:
@@ -114,7 +119,19 @@ def _grab(url: str, t: float, n: int = 4, *, window: float = 2.0) -> list[np.nda
         "-frames:v", str(n), "-vf", f"fps={fps:.3f},scale={PROBE_W}:{PROBE_H},format=rgb24",
         "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
     ]
-    out = subprocess.run(cmd, capture_output=True, timeout=180).stdout
+    proc = subprocess.run(cmd, capture_output=True, timeout=180)
+    if proc.returncode != 0:
+        # Raise rather than return short. A throttled or 403'd fetch returns
+        # empty stdout, which the caller reads as "fewer than 2 frames" and
+        # prints as `skip` — reporting a systemic network failure as a property
+        # of the footage, and quietly curating a library shaped by which
+        # requests happened to succeed.
+        err = (proc.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+        raise RuntimeError(
+            f"ffmpeg exited {proc.returncode} probing at {t:.0f}s: "
+            f"{err[-1] if err else 'no stderr'}"
+        )
+    out = proc.stdout
     sz = PROBE_W * PROBE_H * 3
     return [
         np.frombuffer(out[i * sz : (i + 1) * sz], dtype=np.uint8).reshape(PROBE_H, PROBE_W, 3).astype(np.float32)
@@ -157,7 +174,7 @@ def score_clip(identifier: str, *, probes: int = 5) -> Score | None:
         return None
 
     lic = (md.get("licenseurl") or "").lower()
-    if not any(tok in lic for tok in PUBLIC_DOMAIN):
+    if not broll.is_public_domain(lic):
         print(
             f"      EXCLUDED (licence not public domain: {lic or 'none stated'}): "
             f"{str(title_for_screen)[:40]}",
@@ -217,11 +234,11 @@ def score_clip(identifier: str, *, probes: int = 5) -> Score | None:
     title = md.get("title") or identifier
     if isinstance(title, list):
         title = title[0]
-    year = md.get("year") or (md.get("date") or "")[:4] or None
+    year = broll.year_from(md)
     return Score(
         identifier=identifier,
         title=str(title),
-        year=str(year) if year else None,
+        year=year,
         url=url,
         licenseurl=md.get("licenseurl") or "",
         best_start=round(t, 1),
@@ -248,8 +265,22 @@ def main() -> int:
     ap.add_argument("--query", default="")
     ap.add_argument("--rows", type=int, default=40)
     ap.add_argument("--keep", type=int, default=20)
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", required=True,
+                    help="catalogue path; the filename must match broll-*.json or pair.load() "
+                         "will not pick it up")
     args = ap.parse_args()
+
+    # Refuse up front rather than after the network spend. pair.load() globs
+    # `broll-*.json`, so any other name curates a library, prints a success line,
+    # and is then silently ignored by every render — which is what the module's
+    # own documented invocation used to do.
+    if not (Path(args.out).name.startswith("broll-") and args.out.endswith(".json")):
+        print(
+            f"--out {args.out} would never be loaded: pair.load() globs "
+            f"assets/broll-*.json. Name it broll-{args.collection}.json.",
+            file=sys.stderr,
+        )
+        return 2
 
     cands = broll.search(args.query, collection=args.collection, rows=args.rows)
     print(f"scoring {len(cands)} candidates from {args.collection}…", flush=True)

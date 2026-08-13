@@ -229,7 +229,7 @@
     {
       "identifier": "Televisi1960",
       "title": "Television Commercials (1950s-1960s)",
-      "year": "ca. ",
+      "year": null,
       "url": "https://archive.org/download/Televisi1960/Televisi1960.mp4",
       "best_start": 757.8,
       "motion": 0.1411,
@@ -313,7 +313,7 @@
     {
       "identifier": "YourName1960",
       "title": "Your Name Here",
-      "year": "ca. ",
+      "year": "1960",
       "url": "https://archive.org/download/YourName1960/YourName1960.mp4",
       "best_start": 304.2,
       "motion": 0.0887,
@@ -397,7 +397,7 @@
     {
       "identifier": "122Eyes1950",
       "title": "122 Eyes",
-      "year": "ca. ",
+      "year": null,
       "url": "https://archive.org/download/122Eyes1950/122Eyes1950.mp4",
       "best_start": 178.2,
       "motion": 0.1271,
@@ -453,7 +453,7 @@
     {
       "identifier": "TimeSave1936",
       "title": "Time Savers for House Makers",
-      "year": "ca. ",
+      "year": "1936",
       "url": "https://archive.org/download/TimeSave1936/TimeSave1936.mp4",
       "best_start": 40.4,
       "motion": 0.1089,
@@ -523,7 +523,7 @@
     {
       "identifier": "AtomBomb1946",
       "title": "Atom Bomb [Joe Bonica's Movie of the Month]",
-      "year": "ca. ",
+      "year": "1955",
       "url": "https://archive.org/download/AtomBomb1946/AtomBomb1946.mp4",
       "best_start": 67.0,
       "motion": 0.0471,

@@ -27,7 +27,7 @@ import pair
 import post as P
 from figure import Pose, draw_figure, skin_from_pfp
 from looks import compose
-from skeet_frame import CH, CW, Author, load_font, unsupported_chars
+from skeet_frame import CH, CW, Attribution, load_font, unsupported_chars
 
 FIG = (580, 850)
 
@@ -41,29 +41,38 @@ BLINK_AT = (0.22, 0.68)   # fractions of the cycle where a blink lands
 BLINK_LEN = 0.05
 
 
+def pose_at(t: float, point: bool) -> Pose:
+    """The pose at fraction `t` through one idle cycle.
+
+    Split out from build_poses so the bounds tests drive the figure through the
+    *same* motion the renderer does. The first version of those tests re-derived
+    this formula, which makes a passing test a statement about the copy rather
+    than about what ships.
+    """
+    nod = math.sin(2 * math.pi * t * CYCLE / NOD_PERIOD)
+    # Antenna follows the *derivative* of the nod, so it trails the head and
+    # overshoots when the head stops. This is the whole liveness trick.
+    nod_vel = math.cos(2 * math.pi * t * CYCLE / NOD_PERIOD)
+    return Pose(
+        nod=nod,
+        breathe=math.sin(2 * math.pi * t * CYCLE / BREATHE_PERIOD),
+        antenna=-nod_vel * 21.0,
+        lean=nod * 1.1,
+        point=138 if point else None,
+        blink=any(b <= t < b + BLINK_LEN for b in BLINK_AT),
+    )
+
+
 def build_poses(pfp, variant: str, point: bool, skin, generic: bool = False) -> list:
     """Pre-render one cycle of poses. Redrawing the figure per frame would
     triple render time for motion that repeats anyway."""
-    out = []
-    for i in range(POSE_STEPS):
-        t = i / POSE_STEPS
-        nod = math.sin(2 * math.pi * t * CYCLE / NOD_PERIOD)
-        # Antenna follows the *derivative* of the nod, so it trails the head and
-        # overshoots when the head stops. This is the whole liveness trick.
-        nod_vel = math.cos(2 * math.pi * t * CYCLE / NOD_PERIOD)
-        out.append(
-            draw_figure(
-                pfp, FIG, variant=variant, skin=skin, generic=generic,
-                pose=Pose(
-                    nod=nod,
-                    breathe=math.sin(2 * math.pi * t * CYCLE / BREATHE_PERIOD),
-                    antenna=-nod_vel * 21.0,
-                    lean=nod * 1.1,
-                    point=138 if point else None,
-                    blink=any(b <= t < b + BLINK_LEN for b in BLINK_AT),
-                ),
-            )
+    out = [
+        draw_figure(
+            pfp, FIG, variant=variant, skin=skin, generic=generic,
+            pose=pose_at(i / POSE_STEPS, point),
         )
+        for i in range(POSE_STEPS)
+    ]
 
     # Variants leave different amounts of empty margin in the layer, so crop to
     # actual content. Union across every pose, not per-pose — a bbox that moves
@@ -82,15 +91,22 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--post", required=True, help="bsky.app URL or at:// URI")
     ap.add_argument("--clip", help="archive.org identifier; omitted means draw one from the library")
-    ap.add_argument("--start", type=float, help="in-point in seconds; defaults to the drawn one")
-    ap.add_argument("--dur", type=float, default=10.0)
-    ap.add_argument("--fps", type=int, default=24)
-    ap.add_argument("--variant", default="face", choices=["face", "belly", "crab"])
-    ap.add_argument("--point", action="store_true")
+    ap.add_argument("--collection", default="prelinger",
+                    help="archive the --clip identifier belongs to, for the on-screen credit "
+                         "(default: prelinger; ignored when the clip is drawn from the library)")
+    ap.add_argument("--start", type=float,
+                    help="in-point in seconds; defaults to the curated in-point when the clip is "
+                         "drawn from the library, or 60s when --clip names one explicitly")
+    ap.add_argument("--dur", type=float, default=10.0, help="length in seconds (default 10)")
+    ap.add_argument("--fps", type=int, default=24, help="frame rate (default 24)")
+    ap.add_argument("--variant", default="face", choices=["face", "belly", "crab"],
+                    help="where the avatar goes: its head (face), its belly, or a crab's carapace")
+    ap.add_argument("--point", action="store_true",
+                    help="raise the creature's arm toward the text")
     ap.add_argument("--silent", action="store_true", help="drop the archival audio bed")
     ap.add_argument("--generic", action="store_true",
                     help="palette-only creature, no pfp — for asking before any likeness is used")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", required=True, help="path to write the mp4 to")
     args = ap.parse_args()
 
     sk = P.fetch(args.post)
@@ -103,9 +119,20 @@ def main() -> int:
             print(f"@{sk.handle} has no avatar set — use --generic", file=sys.stderr)
             return 2
         pfp = Image.new("RGB", (256, 256), (128, 128, 128))
-    author = Author(sk.display_name, sk.handle, None)
-    print(f"post: @{sk.handle} · {sk.likes} likes · stands_alone={sk.stands_alone}")
-    print(f"text: {sk.text!r}")
+    # One record, built from the post in a single call. There is deliberately no
+    # path here that names a handle and a body of text separately.
+    quote = Attribution.of(sk)
+    print(f"post: @{sk.handle} · {sk.likes} likes")
+    # Truncated: the operator needs to confirm they fetched the right post, not
+    # to spool a third party's full text into scrollback and any redirected log.
+    preview = sk.text.replace("\n", " ")
+    print(f"text: {preview[:72]}{'…' if len(preview) > 72 else ''}")
+    if not sk.stands_alone:
+        print(
+            "note: this post leans on its parent or an image, so it may not read "
+            "alone. Rendering anyway — pull in the post above if it needs context.",
+            file=sys.stderr,
+        )
 
     if not sk.text.strip():
         print("post has no text (image-only?) — nothing to render", file=sys.stderr)
@@ -123,23 +150,53 @@ def main() -> int:
         )
         return 3
 
-    skin = skin_from_pfp(pfp, seed=sk.handle)
+    # Seed on the DID, not the handle. skin_from_pfp promises "same author, same
+    # creature, every time", and handles change routinely when someone moves to a
+    # custom domain; the DID does not.
+    skin = skin_from_pfp(pfp, seed=sk.did)
 
     if args.clip:
-        clip = broll.fetch(args.clip)
+        clip = broll.fetch(args.clip, collection=args.collection)
         start = args.start if args.start is not None else 60.0
         source = "specified"
     else:
         pick = pair.choose(sk.uri, pair.load())
-        clip = broll.fetch(pick.identifier)
+        # Pass the pick's own collection: the pool is a merge, and without this
+        # every clip credited "Prelinger Archives" including NASA footage.
+        clip = broll.fetch(pick.identifier, collection=pick.collection)
         start = args.start if args.start is not None else pick.start
         source = "drawn"
+
+    if not clip.public_domain:
+        # Library clips were screened at curation, but --clip takes any
+        # archive.org identifier and bypasses that entirely. Refusing here rather
+        # than softening the credit line: an NC term is wrong for a monetised
+        # channel, and "licence unverified" burned into someone's video is not a
+        # thing to ship either.
+        print(
+            f"{clip.identifier}: licence is "
+            f"{clip.licenceurl or 'not stated'}, which is not public domain.\n"
+            "Every frame credits the clip as public domain, so rendering this "
+            "would put a false legal claim on screen — refusing.",
+            file=sys.stderr,
+        )
+        return 4
 
     # Clamp the in-point so the whole window fits inside the film. The library
     # stores a good start time but not a duration, and jitter can push the
     # window past the end — which silently yields a short video rather than an
     # error, so it has to be caught here.
     clip_secs = broll.duration(clip.path)
+    if clip_secs < args.dur:
+        # The clamp below can only shift the window, not create footage. A clip
+        # shorter than --dur used to just stop early and report nothing but the
+        # file size, so the operator got a short video and no reason why.
+        print(
+            f"{clip.identifier} is {clip_secs:.0f}s but --dur is {args.dur:.0f}s — "
+            f"the render would stop early. Lower --dur or pick a longer clip.",
+            file=sys.stderr,
+        )
+        return 5
     start = max(0.0, min(start, max(0.0, clip_secs - args.dur - 1.0)))
     print(f"clip ({source}): {clip.identifier} · {clip_secs:.0f}s · {clip.title[:44]}")
     print(f"in-point: {start:.1f}s")
@@ -158,15 +215,17 @@ def main() -> int:
             t = n / args.fps
             idx = int((t % CYCLE) / CYCLE * POSE_STEPS) % POSE_STEPS
             reveal = min(1.0, 0.34 + (t / (args.dur * 0.45)) * 0.66)
-            yield compose(plate, poses[idx], sk.text, author, clip.credit, reveal=reveal)
+            yield compose(plate, poses[idx], quote, clip.credit_lines, reveal=reveal)
             if n % 48 == 0:
                 print(f"  frame {n}/{total}", flush=True)
 
     out = Path(args.out)
     bed = None
     if not args.silent:
-        bed = broll.audio_segment(clip.path, out.with_suffix(".bed.m4a"), start=start, dur=args.dur)
-        print(f"audio bed: {'clip soundtrack' if bed else 'none (source silent)'}")
+        bed, why = broll.audio_segment(
+            clip.path, out.with_suffix(".bed.m4a"), start=start, dur=args.dur
+        )
+        print(f"audio bed: {why}")
     broll.encode(gen(), out, (CW, CH), args.fps, audio=bed)
     if bed:
         bed.unlink(missing_ok=True)

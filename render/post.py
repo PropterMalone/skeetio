@@ -14,8 +14,10 @@ making the wrong thing unrepresentable rather than by being more careful.
 from __future__ import annotations
 
 import io
+import ipaddress
 import json
 import re
+import socket
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -127,6 +129,26 @@ def fetch(ref: str) -> Post:
 MAX_AVATAR_BYTES = 12_000_000
 
 
+def _is_public_host(host: str | None) -> bool:
+    """Whether a hostname resolves somewhere on the public internet.
+
+    Resolves before judging: a name under an attacker's control can point at
+    127.0.0.1 or 169.254.169.254 just as easily as a literal can, so screening
+    the string alone screens nothing.
+    """
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+    return bool(infos)
+
+
 def avatar(post: Post) -> Image.Image | None:
     """Fetch the author's avatar, or None if they have none set.
 
@@ -141,13 +163,20 @@ def avatar(post: Post) -> Image.Image | None:
     """
     if not post.avatar_url:
         return None
-    if urllib.parse.urlsplit(post.avatar_url).scheme not in ("http", "https"):
-        raise ValueError(f"refusing non-http avatar url for @{post.handle}")
+    split = urllib.parse.urlsplit(post.avatar_url)
+    if split.scheme not in ("http", "https"):
+        # No handle in the message: these strings land in logs and monitoring,
+        # and the handle belongs to a third party who is not the operator.
+        raise ValueError(f"refusing non-http avatar url (scheme {split.scheme!r})")
+    if not _is_public_host(split.hostname):
+        # The URL comes from the AppView today, so no attacker-controlled path
+        # was traced — this is defence in depth in a function that already
+        # reasons about hostile input. Checking the scheme blocks file:// and
+        # nothing else; loopback and link-local are still http.
+        raise ValueError(f"refusing avatar url pointing at a non-public host: {split.hostname!r}")
     req = urllib.request.Request(post.avatar_url, headers=UA)
     with urllib.request.urlopen(req, timeout=30) as r:
         buf = r.read(MAX_AVATAR_BYTES + 1)
     if len(buf) > MAX_AVATAR_BYTES:
-        raise ValueError(
-            f"@{post.handle} avatar exceeds {MAX_AVATAR_BYTES} bytes — refusing to decode"
-        )
+        raise ValueError(f"avatar exceeds {MAX_AVATAR_BYTES} bytes — refusing to decode")
     return Image.open(io.BytesIO(buf)).convert("RGB")

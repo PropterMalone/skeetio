@@ -1,6 +1,16 @@
+node_modules/
+dist/
+out/
+*.mp4
+*.mov
+*.png
+*.jpg
+renders/
+data/
+.env
+# Uploader DID + staged record. Never belongs in a commit, and *.mp4 above does
+# not cover it.
+*.blob.json
+.skeetio-records/
 __pycache__/
 *.pyc
-*.mp4
-*.m4a
-*.blob.json
-.env

@@ -159,9 +159,7 @@ def _shade(layer: Image.Image, skin: Skin) -> Image.Image:
         (w, h), Image.AFFINE, (1, 0, -w * 0.055, 0, 1, -h * 0.05), resample=Image.BICUBIC
     )
     shade = Image.new("RGBA", (w, h), (*skin.body_shade, 255))
-    shade.putalpha(
-        Image.eval(shadow_mask, lambda v: int(v * 0.55)).point(lambda v: v)
-    )
+    shade.putalpha(Image.eval(shadow_mask, lambda v: int(v * 0.55)))
     inv = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     inv.alpha_composite(shade)
     inv.putalpha(Image.composite(inv.split()[3], Image.new("L", (w, h), 0), alpha))
@@ -407,9 +405,19 @@ def draw_figure(
     The creature keeps eyes of its own in this mode regardless of variant, so it
     reads as a character rather than as a figure with its head missing.
     """
+    # Horizontal margin, for the same reason the vertical headroom exists — and
+    # it cannot be bought by asking for a bigger layer. Every coordinate here is
+    # a fraction of W, so a raised arm reaches ~1.08W and the crab's legs ~1.03W
+    # at ANY canvas size; scaling the canvas scales the overshoot with it. The
+    # margin has to enter the coordinate system, so the figure is drawn against
+    # its own W inside a wider canvas. Callers crop to the union bounding box,
+    # so the slack costs nothing in the finished frame.
     W, H = size[0] * SS, size[1] * SS
-    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    PAD = int(W * 0.16)
+    CANVAS_W = W + PAD * 2
+    layer = Image.new("RGBA", (CANVAS_W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
+    x0 = PAD  # left edge of the figure's own coordinate space
 
     nod = max(-1.0, min(1.0, pose.nod))
 
@@ -419,7 +427,7 @@ def draw_figure(
         # than guessing, same rule as the antenna.
         stalk = shell_r * 0.62
         cy = max(H * 0.42, H * 0.030 + stalk + shell_r * 1.02 + H * 0.030) + nod * H * 0.018
-        cx = W * 0.5
+        cx = x0 + W * 0.5
 
         # Legs first so the shell overlaps their roots. Back pairs sit higher
         # and shorter, which gives the cluster depth without any real z-order.
@@ -480,7 +488,8 @@ def draw_figure(
             layer.alpha_composite(_circle_fit(pfp, inner),
                                   (int(cx - inner / 2), int(cy - inner / 2)))
 
-        layer = layer.resize(size, Image.LANCZOS)
+        out_w = round(CANVAS_W / SS)
+        layer = layer.resize((out_w, size[1]), Image.LANCZOS)
         if pose.lean:
             layer = layer.rotate(pose.lean, resample=Image.BICUBIC, expand=False)
         return layer
@@ -509,8 +518,8 @@ def draw_figure(
     body_bot = H * 0.875
     body_h = (body_bot - body_top) * squash
     body_bot = body_top + body_h
-    body_l, body_r = W * 0.175, W * 0.825
-    cx = W * 0.5
+    body_l, body_r = x0 + W * 0.175, x0 + W * 0.825
+    cx = x0 + W * 0.5
 
     # Feet first, so the body overlaps them.
     foot_y = body_bot - H * 0.008
@@ -613,7 +622,8 @@ def draw_figure(
                 _circle_fit(pfp, belly_r), (int(cx - belly_r / 2), int(belly_cy - belly_r / 2))
             )
 
-    layer = layer.resize(size, Image.LANCZOS)
+    out_w = round(CANVAS_W / SS)
+    layer = layer.resize((out_w, size[1]), Image.LANCZOS)
     if pose.lean:
         layer = layer.rotate(pose.lean, resample=Image.BICUBIC, expand=False)
     return layer

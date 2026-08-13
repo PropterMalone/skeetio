@@ -12,6 +12,7 @@ makes a post of unknown length fill the frame.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,7 +50,40 @@ class Author:
     followers: int | None = None
 
 
+@dataclass(frozen=True)
+class Attribution:
+    """Someone's words together with whose they are.
+
+    This exists so that no function anywhere takes the words and the name as two
+    separate arguments. An earlier make_video took --handle and --text
+    independently and put one person's words on screen under another person's
+    name, in a project about asking before reusing what people wrote. post.py
+    fixed that at the fetch boundary and compose() quietly reintroduced it, one
+    loose parameter each.
+
+    Build it with `of()`, which takes the whole post record and is the only
+    supported way in. Do not add a constructor that accepts a bare handle.
+    """
+
+    text: str
+    author: Author
+
+    @classmethod
+    def of(cls, post) -> Attribution:
+        """From a post record — anything carrying text, display_name and handle.
+
+        Duck-typed rather than importing post.Post, which would make this
+        filesystem- and network-adjacent module a dependency of the pure one.
+        """
+        return cls(post.text, Author(post.display_name, post.handle))
+
+
+@functools.lru_cache(maxsize=64)
 def load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
+    """Memoised: compose() asks for the same two faces on every one of a few
+    hundred frames, and this module's own docstring promises callers get
+    already-loaded fonts. Same reasoning as _FIT_CACHE below, which fixed this
+    bug class for fit_text and was never applied to the loader itself."""
     return ImageFont.truetype(str(FONTS / name), size)
 
 
@@ -78,8 +112,20 @@ def unsupported_chars(text: str, font: ImageFont.FreeTypeFont) -> set[str]:
     An earlier version of this compared `getmask(...).tobytes()`, which does not
     exist on ImagingCore — the AttributeError was swallowed and every script on
     earth reported clean. A guard that cannot fail closed is not a guard.
+
+    Which is why the empty-sentinel case raises. If Pillow ever stops returning a
+    mask for the two non-characters, `notdefs` comes out empty, `sig in notdefs`
+    is never true, and the guard silently passes every script on earth again \u2014
+    the exact failure it was rewritten to stop, one Pillow release away under a
+    floor-only version pin.
     """
     notdefs = {sig for c in ("\ufffe", "\uffff") if (sig := _glyph_sig(font, c))}
+    if not notdefs:
+        raise RuntimeError(
+            "cannot fingerprint the .notdef glyph \u2014 the tofu guard would pass "
+            "every script silently, so refusing to render rather than risk empty "
+            "boxes under a real author's name. Check the Pillow version."
+        )
     bad = set()
     for ch in set(text):
         if ch.isspace():
