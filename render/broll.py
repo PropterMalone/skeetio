@@ -17,7 +17,9 @@ NASA's 13,728 items are the same deal when the brief wants pretty over strange.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import tempfile
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -87,11 +89,21 @@ def fetch(identifier: str, *, cache: Path = CACHE, max_bytes: int = 180_000_000)
     dest = cache / f"{identifier}.mp4"
     if not dest.exists():
         url = f"https://archive.org/download/{identifier}/{urllib.parse.quote(pick['name'])}"
-        tmp = dest.with_suffix(".part")
-        with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=300) as r, tmp.open("wb") as f:
-            while chunk := r.read(1 << 20):
-                f.write(chunk)
-        tmp.rename(dest)
+        # Unique temp per process. A fixed ".part" name lets two concurrent
+        # fetches of the same clip interleave into one inode; whichever renames
+        # first lands corrupt bytes at `dest`, and since the guard above is
+        # `dest.exists()`, that corruption is permanent — every later render
+        # silently reuses the broken file. rename(2) within a directory is
+        # atomic, so a unique source makes the publish step safe.
+        fd, tmp_name = tempfile.mkstemp(dir=cache, prefix=f".{identifier}.", suffix=".part")
+        tmp = Path(tmp_name)
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=300) as r, os.fdopen(fd, "wb") as f:
+                while chunk := r.read(1 << 20):
+                    f.write(chunk)
+            tmp.replace(dest)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     year = md.get("year") or (md.get("date") or "")[:4] or None
     title = md.get("title") or identifier

@@ -20,7 +20,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from PIL import Image
+
 import broll
+import pair
 import post as P
 from figure import Pose, draw_figure, skin_from_pfp
 from looks import compose
@@ -38,7 +41,7 @@ BLINK_AT = (0.22, 0.68)   # fractions of the cycle where a blink lands
 BLINK_LEN = 0.05
 
 
-def build_poses(pfp, variant: str, point: bool, skin) -> list:
+def build_poses(pfp, variant: str, point: bool, skin, generic: bool = False) -> list:
     """Pre-render one cycle of poses. Redrawing the figure per frame would
     triple render time for motion that repeats anyway."""
     out = []
@@ -50,7 +53,7 @@ def build_poses(pfp, variant: str, point: bool, skin) -> list:
         nod_vel = math.cos(2 * math.pi * t * CYCLE / NOD_PERIOD)
         out.append(
             draw_figure(
-                pfp, FIG, variant=variant, skin=skin,
+                pfp, FIG, variant=variant, skin=skin, generic=generic,
                 pose=Pose(
                     nod=nod,
                     breathe=math.sin(2 * math.pi * t * CYCLE / BREATHE_PERIOD),
@@ -78,11 +81,11 @@ def build_poses(pfp, variant: str, point: bool, skin) -> list:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--post", required=True, help="bsky.app URL or at:// URI")
-    ap.add_argument("--clip", required=True, help="archive.org identifier")
-    ap.add_argument("--start", type=float, default=60.0)
+    ap.add_argument("--clip", help="archive.org identifier; omitted means draw one from the library")
+    ap.add_argument("--start", type=float, help="in-point in seconds; defaults to the drawn one")
     ap.add_argument("--dur", type=float, default=10.0)
     ap.add_argument("--fps", type=int, default=24)
-    ap.add_argument("--variant", default="face", choices=["face", "belly"])
+    ap.add_argument("--variant", default="face", choices=["face", "belly", "crab"])
     ap.add_argument("--point", action="store_true")
     ap.add_argument("--silent", action="store_true", help="drop the archival audio bed")
     ap.add_argument("--generic", action="store_true",
@@ -92,21 +95,47 @@ def main() -> int:
 
     sk = P.fetch(args.post)
     pfp = P.avatar(sk)
+    if pfp is None:
+        # No avatar set. --generic never shows one, so it proceeds on a
+        # handle-derived palette; every other variant is a picture of their
+        # picture and has nothing to draw.
+        if not args.generic:
+            print(f"@{sk.handle} has no avatar set — use --generic", file=sys.stderr)
+            return 2
+        pfp = Image.new("RGB", (256, 256), (128, 128, 128))
     author = Author(sk.display_name, sk.handle, None)
     print(f"post: @{sk.handle} · {sk.likes} likes · stands_alone={sk.stands_alone}")
     print(f"text: {sk.text!r}")
 
     skin = skin_from_pfp(pfp, seed=sk.handle)
-    clip = broll.fetch(args.clip)
-    print(f"clip: {clip.identifier} · {broll.duration(clip.path):.0f}s · {clip.title[:44]}")
 
-    poses = build_poses(pfp, args.variant, args.point, skin)
-    print(f"cached {len(poses)} poses over a {CYCLE:.1f}s cycle")
+    if args.clip:
+        clip = broll.fetch(args.clip)
+        start = args.start if args.start is not None else 60.0
+        source = "specified"
+    else:
+        pick = pair.choose(sk.uri, pair.load())
+        clip = broll.fetch(pick.identifier)
+        start = args.start if args.start is not None else pick.start
+        source = "drawn"
+
+    # Clamp the in-point so the whole window fits inside the film. The library
+    # stores a good start time but not a duration, and jitter can push the
+    # window past the end — which silently yields a short video rather than an
+    # error, so it has to be caught here.
+    clip_secs = broll.duration(clip.path)
+    start = max(0.0, min(start, max(0.0, clip_secs - args.dur - 1.0)))
+    print(f"clip ({source}): {clip.identifier} · {clip_secs:.0f}s · {clip.title[:44]}")
+    print(f"in-point: {start:.1f}s")
+
+    poses = build_poses(pfp, args.variant, args.point, skin, generic=args.generic)
+    print(f"cached {len(poses)} poses over a {CYCLE:.1f}s cycle"
+          f"{' (generic — no likeness used)' if args.generic else ''}")
 
     total = int(args.dur * args.fps)
 
     def gen():
-        src = broll.frames(clip.path, (CW, CH), start=args.start, dur=args.dur + 0.5, fps=args.fps)
+        src = broll.frames(clip.path, (CW, CH), start=start, dur=args.dur + 0.5, fps=args.fps)
         for n, plate in enumerate(src):
             if n >= total:
                 break
@@ -120,7 +149,7 @@ def main() -> int:
     out = Path(args.out)
     bed = None
     if not args.silent:
-        bed = broll.audio_segment(clip.path, out.with_suffix(".bed.m4a"), start=args.start, dur=args.dur)
+        bed = broll.audio_segment(clip.path, out.with_suffix(".bed.m4a"), start=start, dur=args.dur)
         print(f"audio bed: {'clip soundtrack' if bed else 'none (source silent)'}")
     broll.encode(gen(), out, (CW, CH), args.fps, audio=bed)
     if bed:

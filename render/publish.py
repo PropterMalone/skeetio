@@ -11,7 +11,7 @@ the post record is a separate, explicit step behind `--create-post`, because a
 public post is an outbound message and those are the operator's to send.
 
     python3 render/publish.py --video ~/renders/skeetio-demo.mp4 \
-        --env ~/.config/skeetvideo/.env --alt "..."
+        --env ~/.config/skeetio/.env --alt "..."
 """
 
 from __future__ import annotations
@@ -91,7 +91,14 @@ def pds_did(did: str) -> str:
     service. Read it out of the DID document instead of hardcoding a host —
     accounts migrate between PDSes, and a stale constant fails obscurely.
     """
-    doc = _req(f"https://plc.directory/{did}")
+    # atproto blesses two DID methods. did:web resolves from the domain itself,
+    # and plc.directory knows nothing about those accounts — which is exactly the
+    # profile of someone self-hosting a PDS, i.e. a likely user of a publish tool
+    # they can read the source of.
+    if did.startswith("did:web:"):
+        doc = _req(f"https://{did.split(':', 2)[2]}/.well-known/did.json")
+    else:
+        doc = _req(f"https://plc.directory/{did}")
     for svc in doc.get("service", []):
         if svc.get("id", "").endswith("atproto_pds"):
             host = urllib.parse.urlsplit(svc["serviceEndpoint"]).netloc
@@ -134,7 +141,16 @@ def wait(job_id: str, token: str, *, timeout: float = 600) -> dict:
     deadline = time.time() + timeout
     seen = ""
     while time.time() < deadline:
-        st = _req(f"{VIDEO}/xrpc/app.bsky.video.getJobStatus?jobId={job_id}", token=token)["jobStatus"]
+        st = _req(
+            f"{VIDEO}/xrpc/app.bsky.video.getJobStatus?jobId={job_id}",
+            token=token, ok_codes=(409,),
+        )["jobStatus"]
+        # Check for a blob BEFORE reading state. Bluesky's own guidance is to look
+        # for a BlobRef regardless of whether the job reports success or failure:
+        # an already-processed video surfaces here as an error that still carries
+        # the usable blob. Reading state first throws away a good upload on retry.
+        if st.get("blob"):
+            return st
         state = st.get("state", "")
         if state != seen:
             print(f"  {state}{'  ' + str(st['progress']) + '%' if st.get('progress') else ''}", flush=True)

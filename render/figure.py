@@ -298,6 +298,95 @@ def _plating(
         d.ellipse([cx - gr, ly - gr, cx + gr, ly + gr], fill=skin.blush)
 
 
+def _jointed_leg(
+    d: ImageDraw.ImageDraw,
+    origin: tuple[float, float],
+    out_ang: float,
+    length: float,
+    knee_lift: float,
+    skin: Skin,
+    W: int,
+) -> None:
+    """A two-segment crab leg: out and up to a knee, then down to a tip.
+
+    Crab legs bend *upward* at the joint and come back down, which is what makes
+    the silhouette read as a crab rather than a spider. `knee_lift` raises that
+    joint; animating it per-leg is what gives the scuttle.
+    """
+    ox, oy = origin
+    a = math.radians(out_ang)
+    knee = (ox + math.cos(a) * length * 0.55, oy - math.sin(a) * length * 0.55 - knee_lift)
+    tip = (knee[0] + math.cos(a) * length * 0.62, knee[1] + length * 0.52)
+    _capsule(d, (ox, oy), knee, W * 0.018, W * 0.013, skin.limb)
+    _capsule(d, knee, tip, W * 0.013, W * 0.007, skin.limb)
+    r = W * 0.010
+    d.ellipse([knee[0] - r, knee[1] - r, knee[0] + r, knee[1] + r], fill=skin.limb)
+
+
+def _claw(
+    d: ImageDraw.ImageDraw,
+    shoulder: tuple[float, float],
+    ang: float,
+    length: float,
+    skin: Skin,
+    W: int,
+    *,
+    open_frac: float = 0.30,
+) -> None:
+    """An arm ending in a pincer. The gap between the two halves is what makes
+    it read as a claw rather than a mitten, so it is never drawn fully closed."""
+    sx, sy = shoulder
+    a = math.radians(ang)
+    elbow = (sx + math.cos(a) * length * 0.5, sy - math.sin(a) * length * 0.5)
+    _capsule(d, (sx, sy), elbow, W * 0.034, W * 0.026, skin.limb)
+
+    hand = (elbow[0] + math.cos(a) * length * 0.34, elbow[1] - math.sin(a) * length * 0.34)
+    cr = W * 0.062
+    for sign, frac in ((1, open_frac), (-1, open_frac * 0.55)):
+        spread = math.radians(sign * 26 * (0.4 + frac))
+        tipx = hand[0] + math.cos(a + spread) * cr * 1.5
+        tipy = hand[1] - math.sin(a + spread) * cr * 1.5
+        _capsule(d, hand, (tipx, tipy), cr * 0.62, cr * 0.22, skin.limb)
+    d.ellipse([hand[0] - cr * 0.66, hand[1] - cr * 0.66,
+               hand[0] + cr * 0.66, hand[1] + cr * 0.66], fill=skin.limb)
+
+
+def _eyestalk(
+    d: ImageDraw.ImageDraw,
+    base: tuple[float, float],
+    lean: float,
+    length: float,
+    skin: Skin,
+    W: int,
+    *,
+    blink: bool,
+) -> None:
+    """A stalked eye that bends by `lean`, quadratically toward the tip.
+
+    This is the antenna trick with an animal's excuse for it: crabs really do
+    carry their eyes on stalks, so the follow-through that made the robot feel
+    alive is anatomy here rather than decoration.
+    """
+    bx, by = base
+    pts = []
+    for i in range(11):
+        t = i / 10
+        a = math.radians(lean * t * t)
+        pts.append((bx + math.sin(a) * length * t, by - math.cos(a) * length * t))
+    d.line(pts, fill=skin.limb, width=int(W * 0.022), joint="curve")
+    ex, ey = pts[-1]
+    r = W * 0.040
+    d.ellipse([ex - r, ey - r, ex + r, ey + r], fill=skin.ring)
+    if blink:
+        d.line([(ex - r * 0.7, ey), (ex + r * 0.7, ey)], fill=skin.ink, width=int(W * 0.011))
+    else:
+        pr = r * 0.52
+        d.ellipse([ex - pr, ey - pr, ex + pr, ey + pr], fill=skin.ink)
+        gr = pr * 0.36
+        d.ellipse([ex - gr + pr * 0.3, ey - gr - pr * 0.25,
+                   ex + gr + pr * 0.3, ey + gr - pr * 0.25], fill=(255, 255, 255))
+
+
 def draw_figure(
     pfp: Image.Image,
     size: tuple[int, int],
@@ -305,17 +394,97 @@ def draw_figure(
     variant: str = "belly",
     pose: Pose = Pose(),
     skin: Skin = Skin(),
+    generic: bool = False,
 ) -> Image.Image:
     """Render the creature into an RGBA layer of `size`.
 
     Proportions are expressed against the layer box so a caller can scale the
     figure just by asking for a bigger one.
+
+    `generic` renders the creature with no profile picture at all — only the
+    palette derived from it. That is personalised without being a likeness, and
+    it is what gets sent when nobody has granted permission for their face yet.
+    The creature keeps eyes of its own in this mode regardless of variant, so it
+    reads as a character rather than as a figure with its head missing.
     """
     W, H = size[0] * SS, size[1] * SS
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
 
     nod = max(-1.0, min(1.0, pose.nod))
+
+    if variant == "crab":
+        shell_r = W * 0.290
+        # Eyestalks reach highest; solve the top of the body from that rather
+        # than guessing, same rule as the antenna.
+        stalk = shell_r * 0.62
+        cy = max(H * 0.42, H * 0.030 + stalk + shell_r * 1.02 + H * 0.030) + nod * H * 0.018
+        cx = W * 0.5
+
+        # Legs first so the shell overlaps their roots. Back pairs sit higher
+        # and shorter, which gives the cluster depth without any real z-order.
+        for side in (-1, 1):
+            for i, (spread, ln, ph) in enumerate(
+                ((-6, 0.72, 0.0), (-26, 0.80, 0.33), (-46, 0.70, 0.66))
+            ):
+                lift = math.sin(2 * math.pi * (nod * 0.5 + ph)) * W * 0.026
+                # Roots sit on the shell edge, not inside it. Started at 0.72r
+                # and the whole leg cluster hid behind the carapace, leaving
+                # stubs — a crab silhouette is mostly legs, so they have to
+                # clear the body by a good margin.
+                _jointed_leg(
+                    d,
+                    (cx + side * shell_r * 0.88, cy + shell_r * (0.10 + i * 0.17)),
+                    (0 if side > 0 else 180) - side * spread,
+                    shell_r * ln,
+                    lift,
+                    skin,
+                    W,
+                )
+
+        # Claws. The right one raises to point when asked; the left keeps a
+        # small idle sway so the pair never looks frozen.
+        for side in (-1, 1):
+            base_ang = 52 if side > 0 else 128
+            pointing = side > 0 and pose.point is not None
+            if pointing:
+                # Reach high and gape wide. At the idle angle and idle gape the
+                # pointing pose was indistinguishable from resting.
+                ang = 180 - pose.point
+                reach, gape = 1.02, 0.62
+            else:
+                ang = base_ang + nod * 5 * side
+                reach, gape = 0.86, 0.28 + 0.16 * (nod + 1) / 2
+            _claw(d, (cx + side * shell_r * 0.80, cy - shell_r * 0.12), ang,
+                  shell_r * reach, skin, W, open_frac=gape)
+
+        # Carapace.
+        d.ellipse([cx - shell_r * 1.06, cy - shell_r * 0.94,
+                   cx + shell_r * 1.06, cy + shell_r * 0.98], fill=skin.body)
+        layer = _shade(layer, skin)
+        d = ImageDraw.Draw(layer)
+
+        for side in (-1, 1):
+            _eyestalk(d, (cx + side * shell_r * 0.34, cy - shell_r * 0.80),
+                      pose.antenna + side * 5, stalk, skin, W, blink=pose.blink)
+
+        inner = int(shell_r * 1.62)
+        if generic:
+            d.ellipse([cx - inner / 2, cy - inner / 2, cx + inner / 2, cy + inner / 2],
+                      fill=skin.body_shade)
+            d.arc([cx - inner * 0.26, cy - inner * 0.20, cx + inner * 0.26, cy + inner * 0.30],
+                  start=200, end=340, fill=skin.body, width=max(2, int(W * 0.007)))
+        else:
+            d.ellipse([cx - inner / 2 - W * 0.014, cy - inner / 2 - W * 0.014,
+                       cx + inner / 2 + W * 0.014, cy + inner / 2 + W * 0.014], fill=skin.ring)
+            layer.alpha_composite(_circle_fit(pfp, inner),
+                                  (int(cx - inner / 2), int(cy - inner / 2)))
+
+        layer = layer.resize(size, Image.LANCZOS)
+        if pose.lean:
+            layer = layer.rotate(pose.lean, resample=Image.BICUBIC, expand=False)
+        return layer
+
     # Squash-and-stretch: the body compresses as the head drops. Without this a
     # nod looks like a head sliding on a static torso.
     squash = 1.0 - nod * 0.045 + pose.breathe * 0.020
@@ -411,7 +580,11 @@ def draw_figure(
 
     if variant == "face":
         r = int(head_r * 1.98)
-        layer.alpha_composite(_circle_fit(pfp, r), (int(cx - r / 2), int(head_cy - r / 2)))
+        if generic:
+            d.ellipse([cx - r / 2, head_cy - r / 2, cx + r / 2, head_cy + r / 2], fill=skin.body)
+            _eyes(d, cx, head_cy + head_r * 0.10, head_r * 0.92, skin, blink=pose.blink)
+        else:
+            layer.alpha_composite(_circle_fit(pfp, r), (int(cx - r / 2), int(head_cy - r / 2)))
     else:
         _eyes(d, cx, head_cy + head_r * 0.06, head_r * 0.86, skin, blink=pose.blink)
         belly_r = int((body_r - body_l) * 0.62)
@@ -425,9 +598,20 @@ def draw_figure(
             ],
             fill=skin.ring,
         )
-        layer.alpha_composite(
-            _circle_fit(pfp, belly_r), (int(cx - belly_r / 2), int(belly_cy - belly_r / 2))
-        )
+        if generic:
+            d.ellipse(
+                [cx - belly_r / 2, belly_cy - belly_r / 2, cx + belly_r / 2, belly_cy + belly_r / 2],
+                fill=skin.body,
+            )
+            d.arc(
+                [cx - belly_r * 0.30, belly_cy - belly_r * 0.30,
+                 cx + belly_r * 0.30, belly_cy + belly_r * 0.30],
+                start=200, end=340, fill=skin.body_shade, width=max(2, int(W * 0.006)),
+            )
+        else:
+            layer.alpha_composite(
+                _circle_fit(pfp, belly_r), (int(cx - belly_r / 2), int(belly_cy - belly_r / 2))
+            )
 
     layer = layer.resize(size, Image.LANCZOS)
     if pose.lean:

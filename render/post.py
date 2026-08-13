@@ -124,8 +124,30 @@ def fetch(ref: str) -> Post:
     )
 
 
-def avatar(post: Post) -> Image.Image:
+MAX_AVATAR_BYTES = 12_000_000
+
+
+def avatar(post: Post) -> Image.Image | None:
+    """Fetch the author's avatar, or None if they have none set.
+
+    Returns None rather than raising: --generic renders no likeness at all, and
+    an author with no avatar must not be unrenderable in the one mode that was
+    never going to use their picture.
+
+    The read is capped. `avatar_url` comes from a stranger's profile, not from
+    the operator, so it is exactly the network-sourced binary that `broll.fetch`
+    already bounds with max_bytes — an uncapped read here lets any author whose
+    post gets rendered stall the render host with an oversized image.
+    """
     if not post.avatar_url:
-        raise LookupError(f"@{post.handle} has no avatar set")
-    with urllib.request.urlopen(urllib.request.Request(post.avatar_url, headers=UA), timeout=30) as r:
-        return Image.open(io.BytesIO(r.read())).convert("RGB")
+        return None
+    if urllib.parse.urlsplit(post.avatar_url).scheme not in ("http", "https"):
+        raise ValueError(f"refusing non-http avatar url for @{post.handle}")
+    req = urllib.request.Request(post.avatar_url, headers=UA)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        buf = r.read(MAX_AVATAR_BYTES + 1)
+    if len(buf) > MAX_AVATAR_BYTES:
+        raise ValueError(
+            f"@{post.handle} avatar exceeds {MAX_AVATAR_BYTES} bytes — refusing to decode"
+        )
+    return Image.open(io.BytesIO(buf)).convert("RGB")

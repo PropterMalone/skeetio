@@ -51,7 +51,7 @@ Two things worth knowing if you go further than that:
 
 ## Install
 
-Needs Python 3.10+ and `ffmpeg` on PATH.
+Needs Python 3.10+ and `ffmpeg` **and `ffprobe`** on PATH (both ship together in every standard ffmpeg distribution).
 
 ```
 pip install -r requirements.txt
@@ -74,6 +74,7 @@ Useful flags:
 | `--generic` | palette-derived creature, no avatar — no likeness used |
 | `--point` | raises an arm toward the text |
 | `--silent` | drop the archival audio bed |
+| `--variant crab` | the pfp becomes a crab's carapace, eyestalks and all |
 | `--dur` / `--fps` | length and frame rate (default 10s, 24fps) |
 
 Build your own b-roll library:
@@ -89,6 +90,15 @@ and stages the record; `--create-post` is opt-in):
 ```
 python3 render/publish.py --video out.mp4 --env path/to/.env --alt "..."
 ```
+
+The `.env` needs two keys:
+
+```
+BSKY_IDENTIFIER=you.bsky.social
+BSKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+```
+
+Use an [app password](https://bsky.app/settings/app-passwords), never your account password.
 
 ## Where the footage comes from
 
