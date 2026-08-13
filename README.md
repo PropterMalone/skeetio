@@ -57,6 +57,27 @@ Needs Python 3.10+ and `ffmpeg` **and `ffprobe`** on PATH (both ship together in
 pip install -r requirements.txt
 ```
 
+Downloaded footage is cached at `~/.cache/skeetio/broll/<identifier>.mp4` and is
+never evicted — clips run to ~180 MB each, so if renders start failing on a
+full disk, that directory is the thing to clear.
+
+## Tests
+
+```
+python3 -m pytest -q tests
+```
+
+There is no CI, so these run when someone runs them. They are worth running
+before you change anything in `render/`: they pin the invariants this project
+got wrong at least once each — that the creature is not cut off by its own
+layer or by the frame, that the credit lands inside the safe area and only
+claims public domain when the licence says so, that excluded clips cannot
+re-enter the pool, that the tofu guard fails closed, and that a post's words
+and its author cannot be passed around separately.
+
+Each test's docstring says which bug it exists to catch. If one fails, read
+that before assuming the test is stale.
+
 ## Usage
 
 Render a post over a specific archival clip:

@@ -63,3 +63,44 @@ def test_compose_requires_an_attribution():
     params = inspect.signature(looks.compose).parameters
     assert "quote" in params
     assert "text" not in params and "author" not in params
+
+
+# --- --generic: the mode you use when you have no permission ----------------
+# Not covered by any other test, and figure.py carries THREE independent
+# `if generic:` branches — one per variant. The mode already shipped once as a
+# documented consent feature that did nothing, so the guarantee gets a lock
+# rather than a promise: a refactor reopening any one branch must fail here.
+
+import numpy as np  # noqa: E402
+from PIL import Image  # noqa: E402
+
+import figure as figure_mod  # noqa: E402
+from figure import draw_figure, skin_from_pfp  # noqa: E402
+from make_video import FIG, pose_at  # noqa: E402
+
+
+@pytest.mark.parametrize("variant", ["face", "belly", "crab"])
+def test_generic_renders_no_pixel_of_the_avatar(monkeypatch, variant):
+    """A saturated avatar no ordinary palette produces. If any of it survives
+    into the layer, the creature is carrying a likeness."""
+    monkeypatch.setattr(figure_mod, "SS", 1)
+    magenta = (255, 0, 255)
+    pfp = Image.new("RGB", (400, 400), magenta)
+    skin = skin_from_pfp(pfp, seed="did:plc:generic-test")
+
+    def magenta_pixels(generic: bool) -> int:
+        im = draw_figure(pfp, FIG, variant=variant, skin=skin, generic=generic,
+                         pose=pose_at(0.0, True))
+        a = np.array(im.convert("RGB"))
+        return int(((a[:, :, 0] > 200) & (a[:, :, 1] < 60) & (a[:, :, 2] > 200)).sum())
+
+    assert magenta_pixels(generic=True) == 0, (
+        f"{variant}: --generic drew the avatar's own pixels — it is supposed to "
+        f"use the palette and no likeness at all"
+    )
+    # Guards the test itself: if the probe colour stopped surviving even the
+    # non-generic path, the assertion above would pass for the wrong reason.
+    assert magenta_pixels(generic=False) > 0, (
+        f"{variant}: probe colour did not survive a normal render, so the "
+        f"generic assertion proves nothing"
+    )
