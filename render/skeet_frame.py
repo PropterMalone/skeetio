@@ -53,25 +53,109 @@ def load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(FONTS / name), size)
 
 
+def _glyph_sig(font: ImageFont.FreeTypeFont, ch: str) -> tuple | None:
+    """A fingerprint of what the face actually draws for `ch`."""
+    try:
+        m = font.getmask(ch)
+        return (font.getbbox(ch), m.size, sum(bytes(m)))
+    except Exception:
+        return None
+
+
+def unsupported_chars(text: str, font: ImageFont.FreeTypeFont) -> set[str]:
+    """Characters the face has no glyph for, and will therefore draw as tofu.
+
+    PIL performs no font fallback, so a Japanese, Korean or Arabic post silently
+    rasterises as a row of identical empty rectangles — under the author's real
+    handle and profile picture. Refusing is the only honest option; shipping
+    boxes is worse than not rendering.
+
+    Missing codepoints all resolve to the face's .notdef glyph, so they share a
+    fingerprint with codepoints guaranteed never to be mapped. Astral-plane
+    characters (emoji, mostly) are checked separately: they do not always land
+    on .notdef, and the bundled faces are Latin-only regardless.
+
+    An earlier version of this compared `getmask(...).tobytes()`, which does not
+    exist on ImagingCore — the AttributeError was swallowed and every script on
+    earth reported clean. A guard that cannot fail closed is not a guard.
+    """
+    notdefs = {sig for c in ("\ufffe", "\uffff") if (sig := _glyph_sig(font, c))}
+    bad = set()
+    for ch in set(text):
+        if ch.isspace():
+            continue
+        if ord(ch) > 0xFFFF:
+            bad.add(ch)
+            continue
+        sig = _glyph_sig(font, ch)
+        if sig is None or sig in notdefs:
+            bad.add(ch)
+    return bad
+
+
+def _break_token(
+    word: str, font: ImageFont.FreeTypeFont, max_w: int, draw: ImageDraw.ImageDraw
+) -> list[str]:
+    """Split a single token too wide to fit, at the character level.
+
+    URLs and long hashtags are ordinary skeet content and contain no spaces, so
+    word wrapping alone cannot bound them — the old code emitted such a token on
+    its own line whatever its width, and a normal archive.org link measured
+    2817px inside a 952px box, drawn centred from x = -868.
+    """
+    out, cur = [], ""
+    for ch in word:
+        if cur and draw.textlength(cur + ch, font=font) > max_w:
+            out.append(cur)
+            cur = ch
+        else:
+            cur += ch
+    if cur:
+        out.append(cur)
+    return out
+
+
 def wrap(
     text: str, font: ImageFont.FreeTypeFont, max_w: int, draw: ImageDraw.ImageDraw
 ) -> list[str]:
     """Greedy word wrap. Preserves author line breaks, which carry comic timing."""
     lines: list[str] = []
-    for para in text.split("\n"):
+    paras = text.split("\n")
+    while len(paras) > 1 and not paras[-1].strip():
+        paras.pop()  # a trailing newline ate a whole line of vertical budget
+    for para in paras:
         if not para.strip():
             lines.append("")
             continue
         cur = ""
         for word in para.split():
             trial = f"{cur} {word}".strip()
-            if draw.textlength(trial, font=font) <= max_w or not cur:
+            if draw.textlength(trial, font=font) <= max_w:
                 cur = trial
-            else:
+                continue
+            # The line has to break here. Flush it, then place the word — and if
+            # the word alone still will not fit, split it at the character level.
+            # Testing "is cur empty" first was wrong: a URL arriving after two
+            # short words took the plain branch and landed unbroken on its line.
+            if cur:
                 lines.append(cur)
+                cur = ""
+            if draw.textlength(word, font=font) > max_w:
+                pieces = _break_token(word, font, max_w, draw)
+                lines.extend(pieces[:-1])
+                cur = pieces[-1]
+            else:
                 cur = word
-        lines.append(cur)
+        if cur:
+            lines.append(cur)
     return lines
+
+
+# Every input to fit_text is fixed for the length of a render, but compose() is
+# called per frame — so a 10s/24fps video ran the same binary search 240 times,
+# reloading the font from disk on each probe. build_poses already caches the
+# figure for exactly this reason; the text layer never got the same treatment.
+_FIT_CACHE: dict[tuple, tuple] = {}
 
 
 def fit_text(
@@ -89,6 +173,10 @@ def fit_text(
     This is what keeps a 12-word post and a 60-word post both looking composed.
     A fixed size would leave the short one swimming and clip the long one.
     """
+    key = (text, font_name, box, lo, hi, leading)
+    if key in _FIT_CACHE:
+        return _FIT_CACHE[key]
+
     max_w, max_h = box
     best: tuple[ImageFont.FreeTypeFont, list[str], int] | None = None
     while lo <= hi:
@@ -96,7 +184,8 @@ def fit_text(
         font = load_font(font_name, mid)
         lines = wrap(text, font, max_w, draw)
         line_h = int(mid * leading)
-        if line_h * len(lines) <= max_h:
+        widest = max((draw.textlength(ln, font=font) for ln in lines), default=0)
+        if line_h * len(lines) <= max_h and widest <= max_w:
             best = (font, lines, line_h)
             lo = mid + 1
         else:
@@ -104,7 +193,9 @@ def fit_text(
     if best is None:  # pathological: even `lo` overflows, accept the overflow
         font = load_font(font_name, lo)
         best = (font, wrap(text, font, max_w, draw), int(lo * leading))
-    return best
+    best = (best[0], list(best[1]), best[2])
+    _FIT_CACHE[key] = best
+    return (best[0], list(best[1]), best[2])
 
 
 def draw_paragraph(

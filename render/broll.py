@@ -38,6 +38,7 @@ class Clip:
     title: str
     year: str | None
     path: Path
+    collection: str = "Prelinger Archives"
 
     @property
     def credit(self) -> str:
@@ -45,7 +46,7 @@ class Clip:
         naming the source is free and makes the channel legible rather than
         looking like it scraped something."""
         y = f" ({self.year})" if self.year else ""
-        return f"{self.title}{y} · Prelinger Archives · public domain"
+        return f"{self.title}{y} · {self.collection} · public domain"
 
 
 def search(query: str, *, collection: str = "prelinger", rows: int = 40) -> list[dict]:
@@ -62,7 +63,13 @@ def search(query: str, *, collection: str = "prelinger", rows: int = 40) -> list
         return json.load(r)["response"]["docs"]
 
 
-def fetch(identifier: str, *, cache: Path = CACHE, max_bytes: int = 180_000_000) -> Clip:
+COLLECTION_NAMES = {"prelinger": "Prelinger Archives", "nasa": "NASA"}
+
+
+def fetch(
+    identifier: str, *, cache: Path = CACHE, max_bytes: int = 180_000_000,
+    collection: str = "prelinger",
+) -> Clip:
     """Download the best usable mp4 derivative, cached by identifier."""
     cache.mkdir(parents=True, exist_ok=True)
     with urllib.request.urlopen(
@@ -98,9 +105,12 @@ def fetch(identifier: str, *, cache: Path = CACHE, max_bytes: int = 180_000_000)
         fd, tmp_name = tempfile.mkstemp(dir=cache, prefix=f".{identifier}.", suffix=".part")
         tmp = Path(tmp_name)
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=300) as r, os.fdopen(fd, "wb") as f:
-                while chunk := r.read(1 << 20):
-                    f.write(chunk)
+            # Wrap the fd first: if urlopen raises, os.fdopen never runs and the
+            # raw descriptor leaks — the finally below removes the file, not it.
+            with os.fdopen(fd, "wb") as f:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=300) as r:
+                    while chunk := r.read(1 << 20):
+                        f.write(chunk)
             tmp.replace(dest)
         finally:
             tmp.unlink(missing_ok=True)
@@ -109,7 +119,10 @@ def fetch(identifier: str, *, cache: Path = CACHE, max_bytes: int = 180_000_000)
     title = md.get("title") or identifier
     if isinstance(title, list):
         title = title[0]
-    return Clip(identifier, str(title), str(year) if year else None, dest)
+    return Clip(
+        identifier, str(title), str(year) if year else None, dest,
+        COLLECTION_NAMES.get(collection, collection),
+    )
 
 
 def duration(path: Path) -> float:
@@ -189,7 +202,8 @@ def audio_segment(path: Path, dest: Path, *, start: float, dur: float, gain: flo
 
 
 def encode(frame_iter, out: Path, size: tuple[int, int], fps: int, *, audio: Path | None = None) -> Path:
-    """Pipe RGB frames into x264. Kept deliberately simple: raw RGB frames in, h264 out."""
+    """Pipe RGB frames into x264. Kept deliberately simple: raw frames in,
+    h264 out, parameterised on width and height."""
     w, h = size
     cmd = [
         "ffmpeg", "-v", "error", "-y",

@@ -27,7 +27,7 @@ import pair
 import post as P
 from figure import Pose, draw_figure, skin_from_pfp
 from looks import compose
-from skeet_frame import CH, CW, Author
+from skeet_frame import CH, CW, Author, load_font, unsupported_chars
 
 FIG = (580, 850)
 
@@ -106,6 +106,22 @@ def main() -> int:
     author = Author(sk.display_name, sk.handle, None)
     print(f"post: @{sk.handle} · {sk.likes} likes · stands_alone={sk.stands_alone}")
     print(f"text: {sk.text!r}")
+
+    if not sk.text.strip():
+        print("post has no text (image-only?) — nothing to render", file=sys.stderr)
+        return 2
+    missing = unsupported_chars(sk.text, load_font("EBGaramond-SemiBold.ttf", 64))
+    if missing:
+        # The bundled faces are Latin-only and PIL does no fallback, so these
+        # would draw as empty boxes under the author's real name. Refuse.
+        shown = " ".join(sorted(missing)[:12])
+        print(
+            f"the bundled font has no glyphs for: {shown}\n"
+            "rendering would show empty boxes where their words are — refusing.\n"
+            "bundle a Noto fallback covering this script to support it.",
+            file=sys.stderr,
+        )
+        return 3
 
     skin = skin_from_pfp(pfp, seed=sk.handle)
 

@@ -11,7 +11,7 @@ the post record is a separate, explicit step behind `--create-post`, because a
 public post is an outbound message and those are the operator's to send.
 
     python3 render/publish.py --video ~/renders/skeetio-demo.mp4 \
-        --env ~/.config/skeetio/.env --alt "..."
+        --env <a local checkout>/.env --alt "..."
 """
 
 from __future__ import annotations
@@ -141,10 +141,14 @@ def wait(job_id: str, token: str, *, timeout: float = 600) -> dict:
     deadline = time.time() + timeout
     seen = ""
     while time.time() < deadline:
-        st = _req(
+        # Both shapes, same as upload(): a 409 carries the job flat at the top
+        # level, so indexing ["jobStatus"] crashes on exactly the response this
+        # ok_codes was added to salvage.
+        resp = _req(
             f"{VIDEO}/xrpc/app.bsky.video.getJobStatus?jobId={job_id}",
             token=token, ok_codes=(409,),
-        )["jobStatus"]
+        )
+        st = resp.get("jobStatus", resp)
         # Check for a blob BEFORE reading state. Bluesky's own guidance is to look
         # for a BlobRef regardless of whether the job reports success or failure:
         # an already-processed video surfaces here as an error that still carries
