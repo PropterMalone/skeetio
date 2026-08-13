@@ -1,0 +1,21 @@
+{
+  "note": "Deliberately excluded. pair.load() globs broll-*.json and will NOT pick this up; admitting one is a considered move, not a config flag.",
+  "blocked": [
+    "Japanese1943 (Japanese Relocation)",
+    "MyJapan1945 (My Japan)"
+  ],
+  "held": [
+    {
+      "identifier": "stripper_variety_girls",
+      "reason": "adult (burlesque)"
+    },
+    {
+      "identifier": "AfroMood",
+      "reason": "adult (nudie series)"
+    },
+    {
+      "identifier": "panorama_ephemera2004",
+      "reason": "licence CC BY-NC-SA 4.0, not public domain"
+    }
+  ]
+}

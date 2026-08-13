@@ -119,6 +119,29 @@ It deliberately does **not** score on colour. The earnest mid-century monochrome
 instructional films are most of the charm and should not be penalised for being
 grey.
 
+### It also screens for subject, and you should not remove that
+
+The scorer selects *for* propaganda. It rewards motion, edge detail, brightness
+and a quiet lower third — and mid-century propaganda is well made: steady
+camera, high production value, busy frames. The first library this project
+built led with the US government's 1943 film justifying Japanese-American
+internment, and pairing is uniform random, with the author's real name and face
+on screen.
+
+So `curate.py` carries two tiers. `BLOCK` covers material no pairing defends.
+`HOLD` names the judgment calls and keeps them out until you admit them
+deliberately — silently dropping a camp artifact or a period travelogue is its
+own kind of wrong. A keyword screen cannot tell a film that *is* racist from a
+1947 US Army film *against* racism, so it does not try; it defers.
+
+Curated pools are not safe by construction. They are safe once a human has
+read the list.
+
+It also gates on licence. Every rendered frame stamps "public domain", so a
+clip whose licence does not actually say that makes the credit assert a false
+legal fact — and a non-commercial term is wrong for a monetised channel
+specifically.
+
 ## Things learned the hard way
 
 Kept here because they cost time and are not obvious.

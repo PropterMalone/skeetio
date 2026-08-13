@@ -3,19 +3,6 @@
   "query": "",
   "clips": [
     {
-      "identifier": "Japanese1943",
-      "title": "Japanese Relocation",
-      "year": "ca. ",
-      "url": "https://archive.org/download/Japanese1943/Japanese1943.mp4",
-      "best_start": 483.2,
-      "motion": 0.1924,
-      "brightness": 0.48,
-      "contrast": 0.43,
-      "floor_calm": 0.426,
-      "detail": 0.2029,
-      "total": 3.759
-    },
-    {
       "identifier": "Sniffles1955",
       "title": "Sniffles and Sneezes",
       "year": "1955",
@@ -26,7 +13,8 @@
       "contrast": 0.359,
       "floor_calm": 0.498,
       "detail": 0.124,
-      "total": 3.738
+      "total": 3.738,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "OneGotFa1963",
@@ -39,7 +27,8 @@
       "contrast": 0.539,
       "floor_calm": 0.265,
       "detail": 0.1184,
-      "total": 3.558
+      "total": 3.558,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "ForHealt1941",
@@ -52,7 +41,8 @@
       "contrast": 0.432,
       "floor_calm": 0.395,
       "detail": 0.1099,
-      "total": 3.301
+      "total": 3.301,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "NewOrlea1941",
@@ -65,20 +55,8 @@
       "contrast": 0.423,
       "floor_calm": 0.517,
       "detail": 0.1227,
-      "total": 3.26
-    },
-    {
-      "identifier": "stripper_variety_girls",
-      "title": "Stripper - Variety Girls",
-      "year": null,
-      "url": "https://archive.org/download/stripper_variety_girls/stripper_variety_girls.mp4",
-      "best_start": 211.2,
-      "motion": 0.1594,
-      "brightness": 0.457,
-      "contrast": 0.489,
-      "floor_calm": 0.368,
-      "detail": 0.082,
-      "total": 3.19
+      "total": 3.26,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "ToNewHor1940",
@@ -91,7 +69,8 @@
       "contrast": 0.471,
       "floor_calm": 0.307,
       "detail": 0.2309,
-      "total": 3.172
+      "total": 3.172,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "Corvairi1960",
@@ -104,7 +83,8 @@
       "contrast": 0.375,
       "floor_calm": 0.842,
       "detail": 0.0462,
-      "total": 3.162
+      "total": 3.162,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "WartimeN1943",
@@ -117,7 +97,8 @@
       "contrast": 0.486,
       "floor_calm": 0.534,
       "detail": 0.0412,
-      "total": 3.153
+      "total": 3.153,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "ClassicT1948",
@@ -130,7 +111,8 @@
       "contrast": 0.381,
       "floor_calm": 0.56,
       "detail": 0.0926,
-      "total": 3.152
+      "total": 3.152,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "EatforHe1954",
@@ -143,7 +125,8 @@
       "contrast": 0.453,
       "floor_calm": 0.38,
       "detail": 0.0892,
-      "total": 3.135
+      "total": 3.135,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "GeneralH1928",
@@ -156,7 +139,8 @@
       "contrast": 0.484,
       "floor_calm": 0.305,
       "detail": 0.0744,
-      "total": 3.126
+      "total": 3.126,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "DatingDo1949",
@@ -169,7 +153,8 @@
       "contrast": 0.357,
       "floor_calm": 0.51,
       "detail": 0.0515,
-      "total": 3.104
+      "total": 3.104,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "Exercise1949",
@@ -182,7 +167,8 @@
       "contrast": 0.432,
       "floor_calm": 0.58,
       "detail": 0.0951,
-      "total": 3.101
+      "total": 3.101,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "Looktoth1953",
@@ -195,7 +181,8 @@
       "contrast": 0.594,
       "floor_calm": 0.882,
       "detail": 0.0417,
-      "total": 3.052
+      "total": 3.052,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "Century21964",
@@ -208,7 +195,8 @@
       "contrast": 0.365,
       "floor_calm": 0.57,
       "detail": 0.0581,
-      "total": 3.026
+      "total": 3.026,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "bacteria_friend_and_foe",
@@ -221,7 +209,8 @@
       "contrast": 0.44,
       "floor_calm": 0.573,
       "detail": 0.1728,
-      "total": 3.015
+      "total": 3.015,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "tmp_50168",
@@ -234,7 +223,8 @@
       "contrast": 0.443,
       "floor_calm": 0.687,
       "detail": 0.0242,
-      "total": 3.013
+      "total": 3.013,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "Televisi1960",
@@ -247,7 +237,8 @@
       "contrast": 0.599,
       "floor_calm": 0.216,
       "detail": 0.0997,
-      "total": 3.007
+      "total": 3.007,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "Careofth1949",
@@ -260,7 +251,8 @@
       "contrast": 0.304,
       "floor_calm": 0.649,
       "detail": 0.1017,
-      "total": 3.006
+      "total": 3.006,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "CaseofSp1940",
@@ -273,7 +265,8 @@
       "contrast": 0.449,
       "floor_calm": 0.605,
       "detail": 0.0713,
-      "total": 2.99
+      "total": 2.99,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "DontBeaS1947",
@@ -286,20 +279,8 @@
       "contrast": 0.305,
       "floor_calm": 0.59,
       "detail": 0.0643,
-      "total": 2.984
-    },
-    {
-      "identifier": "AfroMood",
-      "title": "Afro Mood Burlesque",
-      "year": null,
-      "url": "https://archive.org/download/AfroMood/AfroMood.mp4",
-      "best_start": 212.1,
-      "motion": 0.1185,
-      "brightness": 0.42,
-      "contrast": 0.373,
-      "floor_calm": 0.514,
-      "detail": 0.0741,
-      "total": 2.969
+      "total": 2.984,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "boys_beware",
@@ -312,7 +293,8 @@
       "contrast": 0.536,
       "floor_calm": 0.228,
       "detail": 0.0797,
-      "total": 2.965
+      "total": 2.965,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "right_to_health_1",
@@ -325,20 +307,8 @@
       "contrast": 0.437,
       "floor_calm": 0.458,
       "detail": 0.0971,
-      "total": 2.954
-    },
-    {
-      "identifier": "breath_takers_2",
-      "title": "Breath-Takers, 2",
-      "year": null,
-      "url": "https://archive.org/download/breath_takers_2/breath_takers_2.mp4",
-      "best_start": 493.7,
-      "motion": 0.1047,
-      "brightness": 0.45,
-      "contrast": 0.243,
-      "floor_calm": 0.684,
-      "detail": 0.04,
-      "total": 2.946
+      "total": 2.954,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "YourName1960",
@@ -351,7 +321,8 @@
       "contrast": 0.322,
       "floor_calm": 0.555,
       "detail": 0.0734,
-      "total": 2.944
+      "total": 2.944,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "GoingPla1948",
@@ -364,7 +335,8 @@
       "contrast": 0.361,
       "floor_calm": 0.54,
       "detail": 0.075,
-      "total": 2.934
+      "total": 2.934,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "MalibuMermai",
@@ -377,20 +349,8 @@
       "contrast": 0.562,
       "floor_calm": 0.142,
       "detail": 0.0699,
-      "total": 2.922
-    },
-    {
-      "identifier": "4050_What_Makes_Us_Tick_02_01_18_19",
-      "title": "What Makes Us Tick",
-      "year": "1952",
-      "url": "https://archive.org/download/4050_What_Makes_Us_Tick_02_01_18_19/4050_What_Makes_Us_Tick_02_01_18_19.mp4",
-      "best_start": 592.7,
-      "motion": 0.0655,
-      "brightness": 0.406,
-      "contrast": 0.296,
-      "floor_calm": 0.802,
-      "detail": 0.0524,
-      "total": 2.9
+      "total": 2.922,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "1955Chev1955",
@@ -403,7 +363,8 @@
       "contrast": 0.262,
       "floor_calm": 0.668,
       "detail": 0.0601,
-      "total": 2.898
+      "total": 2.898,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "DateWith1950",
@@ -416,7 +377,8 @@
       "contrast": 0.435,
       "floor_calm": 0.585,
       "detail": 0.0565,
-      "total": 2.872
+      "total": 2.872,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "hindenberg_explodes",
@@ -429,7 +391,8 @@
       "contrast": 0.222,
       "floor_calm": 0.83,
       "detail": 0.032,
-      "total": 2.868
+      "total": 2.868,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "122Eyes1950",
@@ -442,7 +405,8 @@
       "contrast": 0.393,
       "floor_calm": 0.439,
       "detail": 0.081,
-      "total": 2.862
+      "total": 2.862,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "CherryKnight",
@@ -455,7 +419,8 @@
       "contrast": 0.38,
       "floor_calm": 0.552,
       "detail": 0.0536,
-      "total": 2.86
+      "total": 2.86,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "Experime1940",
@@ -468,7 +433,8 @@
       "contrast": 0.421,
       "floor_calm": 0.383,
       "detail": 0.1168,
-      "total": 2.844
+      "total": 2.844,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "RideforC1937",
@@ -481,7 +447,8 @@
       "contrast": 0.352,
       "floor_calm": 0.625,
       "detail": 0.0801,
-      "total": 2.84
+      "total": 2.84,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "TimeSave1936",
@@ -494,7 +461,8 @@
       "contrast": 0.465,
       "floor_calm": 0.401,
       "detail": 0.0559,
-      "total": 2.835
+      "total": 2.835,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "HowtoGoP1954",
@@ -507,7 +475,8 @@
       "contrast": 0.452,
       "floor_calm": 0.396,
       "detail": 0.0665,
-      "total": 2.832
+      "total": 2.832,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "DuckandC1951",
@@ -520,20 +489,8 @@
       "contrast": 0.43,
       "floor_calm": 0.25,
       "detail": 0.0676,
-      "total": 2.823
-    },
-    {
-      "identifier": "panorama_ephemera2004",
-      "title": "Panorama Ephemera",
-      "year": "2004",
-      "url": "https://archive.org/download/panorama_ephemera2004/panorama_ephemera.mp4",
-      "best_start": 3628.1,
-      "motion": 0.1359,
-      "brightness": 0.534,
-      "contrast": 0.505,
-      "floor_calm": 0.32,
-      "detail": 0.0791,
-      "total": 2.822
+      "total": 2.823,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "ParkCons1938",
@@ -546,7 +503,8 @@
       "contrast": 0.396,
       "floor_calm": 0.64,
       "detail": 0.0439,
-      "total": 2.814
+      "total": 2.814,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "Foundati1951",
@@ -559,7 +517,8 @@
       "contrast": 0.235,
       "floor_calm": 0.712,
       "detail": 0.0424,
-      "total": 2.781
+      "total": 2.781,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
       "identifier": "AtomBomb1946",
@@ -572,20 +531,13 @@
       "contrast": 0.658,
       "floor_calm": 0.492,
       "detail": 0.0283,
-      "total": 2.78
-    },
-    {
-      "identifier": "MyJapan1945",
-      "title": "My Japan",
-      "year": "1945",
-      "url": "https://archive.org/download/MyJapan1945/MyJapan1945.mp4",
-      "best_start": 313.1,
-      "motion": 0.0808,
-      "brightness": 0.513,
-      "contrast": 0.427,
-      "floor_calm": 0.532,
-      "detail": 0.058,
-      "total": 2.777
+      "total": 2.78,
+      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     }
-  ]
+  ],
+  "screened": {
+    "blocked_racist_propaganda": 2,
+    "held_adult_or_licence": 3,
+    "admitted_after_review": 9
+  }
 }

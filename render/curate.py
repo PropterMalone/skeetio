@@ -20,6 +20,7 @@ import argparse
 import json
 import subprocess
 import sys
+import re as _re
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
@@ -34,20 +35,55 @@ import broll
 
 PROBE_W, PROBE_H = 192, 144
 
+# Two tiers, because one list cannot do both jobs.
+#
+# The screen exists because the scorer selects FOR this material rather than
+# against it: it rewards motion, edge detail, brightness and a quiet lower
+# third, and mid-century propaganda is well-made — steady camera, high
+# production value, busy frames. The top-ranked clip in the first shipped
+# library was the US government's 1943 film justifying Japanese-American
+# internment.
+#
+# The failure mode is specific: pairing is uniform random and the author's real
+# name and face are on screen, so the pairing reads as the channel saying
+# something about that person.
+#
+# The policy, plainly: racist propaganda is out. Everything else edgy is a
+# judgment call about how a given clip actually scans, which a regex cannot
+# make — so HOLD keeps those out of the pool and names them, for a human to
+# admit or reject once, explicitly. Silently dropping a camp artifact like
+# "Boys Beware" or a period travelogue is its own kind of wrong.
+BLOCK = _re.compile(
+    r"""
+      \b nazi \b | hitler | third \s+ reich | \b gestapo | \b fascis
+    | \b intern(ment|ee)s? \b | relocation \s+ (center|centre|camp)
+    | \b japanese \s+ relocation | \b my \s+ japan | know \s+ your \s+ enemy
+    | \b jap \b | \b japs \b | \b nip \b | \b negro | \b coon | \b darkie
+    | colored \s+ (people|folks?) | segregat | eugenic | miscegen
+    | racial \s+ (hygiene|purity|superiority) | white \s+ supremac
+    | lynch | massacre | atrocit | genocide | concentration \s+ camp
+    """,
+    _re.I | _re.X,
+)
 
-@dataclass
-class Score:
-    identifier: str
-    title: str
-    year: str | None
-    url: str
-    best_start: float
-    motion: float
-    brightness: float
-    contrast: float
-    floor_calm: float
-    detail: float
-    total: float
+HOLD = _re.compile(
+    r"""
+      \b war \b | wartime | combat | infantry | bombing | invasion | propagand
+    | atom(ic)? \s* bomb | hydrogen \s* bomb | hiroshima | nagasaki | nuclear
+    | civil \s+ defense | duck \s+ and \s+ cover | air \s+ raid
+    | homosexual | \b deviat | \b pervert | delinquen
+    | \b strip(per|tease|ping) | burlesq | \b nude | nudist | girlie | sexploit
+    | venereal | syphilis | abortion | childbirth | surgical | autopsy | cadaver
+    | disaster | \b riot | \b crash | explo(de|des|sion|sive) | funeral | epidemic
+    """,
+    _re.I | _re.X,
+)
+
+# Licences the Internet Archive records that genuinely permit unrestricted
+# reuse. Every rendered frame stamps "public domain", so a clip whose licence
+# does not actually say that makes the credit line assert a false legal fact —
+# and an NC term is wrong for a monetised channel specifically.
+PUBLIC_DOMAIN = ("publicdomain", "public-domain", "cc0", "mark/1.0", "zero/1.0")
 
 
 def _mp4_url(identifier: str) -> tuple[str, dict]:
@@ -87,17 +123,46 @@ def _grab(url: str, t: float, n: int = 4, *, window: float = 2.0) -> list[np.nda
 
 
 def score_clip(identifier: str, *, probes: int = 5) -> Score | None:
+    # Failures are reported, not swallowed. A network outage, a throttle, or a
+    # missing ffprobe all used to print the same "skip" as a genuinely bad clip,
+    # so a systemic failure read as "this batch of footage was poor".
     try:
         url, md = _mp4_url(identifier)
-    except Exception:
+    except Exception as e:
+        print(f"      metadata failed: {type(e).__name__}: {e}", flush=True)
         return None
 
     # Skip the first and last tenth: titles at the head, credits at the tail.
     try:
         dur = float(md.get("runtime_secs") or 0) or _duration_via_url(url)
-    except Exception:
+    except Exception as e:
+        print(f"      duration failed: {type(e).__name__}: {e}", flush=True)
         return None
     if dur < 40:
+        return None
+
+    title_for_screen = md.get("title") or identifier
+    if isinstance(title_for_screen, list):
+        title_for_screen = title_for_screen[0]
+    haystack = f"{title_for_screen} {identifier} {md.get('description') or ''}"
+    if isinstance(md.get("subject"), (list, str)):
+        haystack += " " + " ".join(
+            md["subject"] if isinstance(md["subject"], list) else [md["subject"]]
+        )
+    if BLOCK.search(haystack):
+        print(f"      BLOCKED (subject): {str(title_for_screen)[:52]}", flush=True)
+        return None
+    if HOLD.search(haystack):
+        print(f"      HELD for sign-off: {str(title_for_screen)[:52]}", flush=True)
+        return None
+
+    lic = (md.get("licenseurl") or "").lower()
+    if not any(tok in lic for tok in PUBLIC_DOMAIN):
+        print(
+            f"      EXCLUDED (licence not public domain: {lic or 'none stated'}): "
+            f"{str(title_for_screen)[:40]}",
+            flush=True,
+        )
         return None
 
     best: tuple[float, float, dict] | None = None
@@ -105,7 +170,8 @@ def score_clip(identifier: str, *, probes: int = 5) -> Score | None:
         t = dur * (0.15 + 0.7 * (i / max(1, probes - 1)))
         try:
             fr = _grab(url, t)
-        except Exception:
+        except Exception as e:
+            print(f"      probe @{t:.0f}s failed: {type(e).__name__}: {e}", flush=True)
             continue
         if len(fr) < 2:
             continue
@@ -157,6 +223,7 @@ def score_clip(identifier: str, *, probes: int = 5) -> Score | None:
         title=str(title),
         year=str(year) if year else None,
         url=url,
+        licenseurl=md.get("licenseurl") or "",
         best_start=round(t, 1),
         motion=round(m["motion"], 4),
         brightness=round(m["brightness"], 3),

@@ -1,7 +1,7 @@
 # pattern: Functional Core
 """Choose which archival clip backs a given post.
 
-**Random**, by design. Relevance is not the point — the karaoke
+the maintainer's call, 2026-08-13: **random**. Relevance is not the point — the karaoke
 principle is that the footage has to move, not that it has to mean anything. A
 matcher that always lands on the nose stops being funny by the fourth video,
 whereas an occasional coincidence is the one people screenshot.
@@ -52,7 +52,16 @@ def load(*paths: Path) -> list[dict]:
     files = list(paths) or sorted(LIBRARY.glob("broll-*.json"))
     pool: dict[str, dict] = {}
     for f in files:
-        for c in json.loads(f.read_text())["clips"]:
+        data = json.loads(f.read_text())
+        # A file without "clips" is not a library. Skipping rather than raising
+        # matters because the quarantine file for excluded clips was originally
+        # named broll-held.json, which this very glob matched — so the file
+        # holding the material deliberately kept OUT of the pool was being read
+        # into it, and only failed loudly because it had no "clips" key. It is
+        # now assets/excluded-clips.json, and this guard is the second lock.
+        if "clips" not in data:
+            continue
+        for c in data["clips"]:
             pool[c["identifier"]] = c  # dedupe: a clip may appear in two collections
     return list(pool.values())
 
