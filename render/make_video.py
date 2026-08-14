@@ -27,6 +27,7 @@ import pair
 import post as P
 from figure import Pose, draw_figure, skin_from_pfp
 from looks import compose
+import exits
 from skeet_frame import CH, CW, Attribution, load_font, unsupported_chars
 
 FIG = (580, 850)
@@ -117,7 +118,7 @@ def main() -> int:
         # picture and has nothing to draw.
         if not args.generic:
             print(f"@{sk.handle} has no avatar set — use --generic", file=sys.stderr)
-            return 2
+            return exits.NO_AVATAR
         pfp = Image.new("RGB", (256, 256), (128, 128, 128))
     # One record, built from the post in a single call. There is deliberately no
     # path here that names a handle and a body of text separately.
@@ -136,7 +137,7 @@ def main() -> int:
 
     if not sk.text.strip():
         print("post has no text (image-only?) — nothing to render", file=sys.stderr)
-        return 2
+        return exits.NO_TEXT
     missing = unsupported_chars(sk.text, load_font("EBGaramond-SemiBold.ttf", 64))
     if missing:
         # The bundled faces are Latin-only and PIL does no fallback, so these
@@ -148,7 +149,7 @@ def main() -> int:
             "bundle a Noto fallback covering this script to support it.",
             file=sys.stderr,
         )
-        return 3
+        return exits.UNRENDERABLE_SCRIPT
 
     # Seed on the DID, not the handle. skin_from_pfp promises "same author, same
     # creature, every time", and handles change routinely when someone moves to a
@@ -180,7 +181,7 @@ def main() -> int:
             "would put a false legal claim on screen — refusing.",
             file=sys.stderr,
         )
-        return 4
+        return exits.CLIP_NOT_PUBLIC_DOMAIN
 
     # Clamp the in-point so the whole window fits inside the film. The library
     # stores a good start time but not a duration, and jitter can push the
@@ -196,7 +197,7 @@ def main() -> int:
             f"the render would stop early. Lower --dur or pick a longer clip.",
             file=sys.stderr,
         )
-        return 5
+        return exits.CLIP_TOO_SHORT
     start = max(0.0, min(start, max(0.0, clip_secs - args.dur - 1.0)))
     print(f"clip ({source}): {clip.identifier} · {clip_secs:.0f}s · {clip.title[:44]}")
     print(f"in-point: {start:.1f}s")
@@ -230,7 +231,7 @@ def main() -> int:
     if bed:
         bed.unlink(missing_ok=True)
     print(f"wrote {out} ({out.stat().st_size/1e6:.1f} MB)")
-    return 0
+    return exits.OK
 
 
 if __name__ == "__main__":

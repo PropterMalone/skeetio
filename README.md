@@ -121,6 +121,34 @@ BSKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
 
 Use an [app password](https://bsky.app/settings/app-passwords), never your account password.
 
+## Exit codes
+
+Both CLIs are meant to be driven by something automated, and for that caller the
+exit code is the whole failure channel — it never sees the stderr you read. So
+the codes are an API, defined once in `render/exits.py`, and the tens digit
+carries the action:
+
+| Code | Name | Means | What the caller should do |
+| --- | --- | --- | --- |
+| `0` | `OK` | rendered, or uploaded | done |
+| `10` | `NO_TEXT` | the post has no text — image-only, or a bare quote | permanent; there is nothing to render |
+| `11` | `UNRENDERABLE_SCRIPT` | the bundled fonts have no glyphs for this script | permanent for this text; the script is unsupported |
+| `20` | `NO_AVATAR` | the author has no avatar set | retry with `--generic`, which uses no likeness |
+| `21` | `CLIP_NOT_PUBLIC_DOMAIN` | the named clip's licence is not public domain | retry without `--clip` to draw a screened one |
+| `22` | `CLIP_TOO_SHORT` | the clip is shorter than `--dur` | retry with a lower `--dur`, or without `--clip` |
+| `30` | `BAD_ENV` | no usable credentials in the `--env` file | operator error; alert a human, do not retry |
+| `31` | `IDENTITY_MISMATCH` | `--expect-account` does not match `--env` | operator error; alert a human |
+| `32` | `EMPTY_POST_TEXT` | `--create-post` with no `--text` | operator error; alert a human |
+| `40` | `UPLOAD_REFUSED` | the video service refused the upload | retry later unchanged; usually a quota limit |
+
+`1x` is permanent, `2x` is worth retrying with the named change, `3x` means your
+configuration is wrong, `4x` means the far end said no. **Never retry around a
+`3x`** — retrying past `IDENTITY_MISMATCH` means retrying past the guard that
+stops you uploading as the wrong person.
+
+Codes are never recycled. If a condition stops existing its number retires with
+it, so an old caller cannot silently pick up a new meaning.
+
 ## Where the footage comes from
 
 [Prelinger Archives](https://archive.org/details/prelinger) on the Internet
@@ -154,6 +182,16 @@ So `curate.py` carries two tiers. `BLOCK` covers material no pairing defends.
 deliberately — silently dropping a camp artifact or a period travelogue is its
 own kind of wrong. A keyword screen cannot tell a film that *is* racist from a
 1947 US Army film *against* racism, so it does not try; it defers.
+
+Admitting one is a `--admit`:
+
+```
+python3 render/curate.py --collection prelinger --admit SomeIdentifier \
+    --out assets/broll-prelinger.json
+```
+
+Repeatable, and it reaches `HOLD` only. `BLOCK` is not a judgment call and
+`--admit` cannot touch it — if it could, the policy would just be a flag.
 
 Curated pools are not safe by construction. They are safe once a human has
 read the list.
@@ -201,6 +239,31 @@ throughout, with the dimensions threaded through its layout and muxer, and no
 text-wrapping helper at all — and post text *is* the content here. Check whether
 the thing you want to vary is genuinely a parameter or is baked into the
 geometry.
+
+## What is where
+
+Nine modules in `render/`, in roughly the order a render moves through them:
+
+- `post.py` — fetches a Bluesky post as one indivisible record. Text, author and
+  avatar arrive together or not at all; there is deliberately no way to supply a
+  handle and a body of text separately.
+- `pair.py` — picks which archival clip backs this post, seeded on the post URI.
+  Deterministic, and stable when the library changes.
+- `broll.py` — downloads and decodes footage from the Internet Archive, caches
+  it, lifts the audio bed, and owns the public-domain licence rule.
+- `curate.py` — offline tool that builds the clip library: scores candidates for
+  motion and legibility, and screens them for subject and licence.
+- `figure.py` — the posable creature carrying the author's avatar. `skin_from_pfp`
+  derives its palette from that avatar; `--generic` uses the palette and no
+  likeness at all.
+- `skeet_frame.py` — paragraph wrapping and binary-search type fitting, the safe
+  area, and the guard that refuses scripts the bundled fonts cannot draw.
+- `looks.py` — assembles a frame: scrim, haloed type, contact shadow, creature,
+  credit.
+- `make_video.py` — the CLI. Ties the above together and encodes the mp4.
+- `publish.py` — uploads to Bluesky as a native video blob. Does **not** post;
+  `--create-post` is opt-in, because a post is an outbound message.
+- `exits.py` — the exit-code contract above.
 
 ## Layout notes
 

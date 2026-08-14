@@ -139,7 +139,23 @@ def _grab(url: str, t: float, n: int = 4, *, window: float = 2.0) -> list[np.nda
     ]
 
 
-def score_clip(identifier: str, *, probes: int = 5) -> Score | None:
+def screen(haystack: str, *, admit: bool = False) -> str:
+    """What the subject screen does with this text: block, hold, admitted, pass.
+
+    A pure function so the one property that matters can actually be tested:
+    **--admit reaches HOLD and can never reach BLOCK.** HOLD means "no human has
+    looked at this yet" — a judgment call the README says is yours to make. BLOCK
+    means "no pairing defends this". An --admit that could override the second
+    would quietly turn a policy into a flag.
+    """
+    if BLOCK.search(haystack):
+        return "block"
+    if HOLD.search(haystack):
+        return "admitted" if admit else "hold"
+    return "pass"
+
+
+def score_clip(identifier: str, *, probes: int = 5, admit: bool = False) -> Score | None:
     # Failures are reported, not swallowed. A network outage, a throttle, or a
     # missing ffprobe all used to print the same "skip" as a genuinely bad clip,
     # so a systemic failure read as "this batch of footage was poor".
@@ -166,12 +182,16 @@ def score_clip(identifier: str, *, probes: int = 5) -> Score | None:
         haystack += " " + " ".join(
             md["subject"] if isinstance(md["subject"], list) else [md["subject"]]
         )
-    if BLOCK.search(haystack):
+    verdict = screen(haystack, admit=admit)
+    if verdict == "block":
         print(f"      BLOCKED (subject): {str(title_for_screen)[:52]}", flush=True)
         return None
-    if HOLD.search(haystack):
+    if verdict == "hold":
         print(f"      HELD for sign-off: {str(title_for_screen)[:52]}", flush=True)
+        print("        (re-run with --admit <identifier> if you have reviewed it)", flush=True)
         return None
+    if verdict == "admitted":
+        print(f"      ADMITTED by hand: {str(title_for_screen)[:52]}", flush=True)
 
     lic = (md.get("licenseurl") or "").lower()
     if not broll.is_public_domain(lic):
@@ -265,6 +285,10 @@ def main() -> int:
     ap.add_argument("--query", default="")
     ap.add_argument("--rows", type=int, default=40)
     ap.add_argument("--keep", type=int, default=20)
+    ap.add_argument("--admit", action="append", default=[], metavar="IDENTIFIER",
+                    help="admit a clip the subject screen would HOLD, having reviewed it "
+                         "yourself. Repeatable. Cannot admit a BLOCKed clip — that tier is "
+                         "material no pairing defends, and it is not a judgment call.")
     ap.add_argument("--out", required=True,
                     help="catalogue path; the filename must match broll-*.json or pair.load() "
                          "will not pick it up")
@@ -282,12 +306,17 @@ def main() -> int:
         )
         return 2
 
+    admitted = set(args.admit)
+    if admitted:
+        print(f"admitting {len(admitted)} held clip(s) by hand: {', '.join(sorted(admitted))}",
+              flush=True)
+
     cands = broll.search(args.query, collection=args.collection, rows=args.rows)
     print(f"scoring {len(cands)} candidates from {args.collection}…", flush=True)
 
     scored: list[Score] = []
     for i, c in enumerate(cands, 1):
-        s = score_clip(c["identifier"])
+        s = score_clip(c["identifier"], admit=c["identifier"] in admitted)
         flag = f"{s.total:6.2f}" if s else "  skip"
         print(f"  [{i:>3}/{len(cands)}] {flag}  {c['identifier'][:38]}", flush=True)
         if s:

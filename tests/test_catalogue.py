@@ -129,3 +129,37 @@ def test_pairing_is_stable_across_pool_order():
     ]
     uri = "at://did:plc:x/app.bsky.feed.post/abc"
     assert pair.choose(uri, pool).identifier == pair.choose(uri, list(reversed(pool))).identifier
+
+
+# --- the subject screen's two tiers, and what --admit may reach ---------------
+
+from curate import screen  # noqa: E402
+
+
+def test_admit_reaches_hold_but_never_block():
+    """HOLD means "nobody has looked at this yet" — a judgment call, and the
+    README says it is yours to make. BLOCK means "no pairing defends this".
+    An --admit that could override BLOCK would turn a policy into a flag."""
+    blocked = "Japanese Relocation 1943 internment propaganda"
+    assert screen(blocked) == "block"
+    assert screen(blocked, admit=True) == "block", (
+        "--admit reached the BLOCK tier; that tier is not a judgment call"
+    )
+
+
+def test_admit_is_what_releases_a_held_clip():
+    held = "Variety Girls burlesque striptease"
+    assert screen(held) == "hold"
+    assert screen(held, admit=True) == "admitted"
+
+
+def test_ordinary_footage_passes_untouched():
+    assert screen("Design for Dreaming 1956 General Motors Motorama") == "pass"
+
+
+def test_the_screen_cannot_tell_anti_racist_film_from_racist_one():
+    """`Don't Be a Sucker` is a 1947 US Army film AGAINST racism. It trips the
+    screen, and that is the correct behaviour — a keyword screen cannot read
+    stance, so it defers to a human instead of guessing. Pinned so nobody
+    'fixes' the false positive by teaching the regex to guess."""
+    assert screen("Don't Be a Sucker 1947 racism prejudice propaganda") in ("block", "hold")

@@ -27,6 +27,10 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import exits  # noqa: E402
+
 PDS = "https://bsky.social"
 VIDEO = "https://video.bsky.app"
 VIDEO_DID = "did:web:video.bsky.app"
@@ -212,7 +216,7 @@ def main() -> int:
           or env.get("BSKY_DM_APP_PASSWORD"))
     if not ident or not pw:
         print(f"no BSKY_IDENTIFIER / BSKY_APP_PASSWORD in {args.env}", file=sys.stderr)
-        return 2
+        return exits.BAD_ENV
 
     # Identity guard. Three identifier names and three password names bind to
     # whatever --env is passed, and the accounts this project touches are
@@ -227,7 +231,7 @@ def main() -> int:
             f"different account. Refusing to upload.",
             file=sys.stderr,
         )
-        return 2
+        return exits.IDENTITY_MISMATCH
     if not args.expect_account:
         print(
             "warning: no --expect-account, so nothing checked which identity this "
@@ -251,7 +255,7 @@ def main() -> int:
           f"maxBytes={limits.get('remainingDailyBytes')}")
     if not limits.get("canUpload"):
         print(f"upload refused: {limits.get('message')}", file=sys.stderr)
-        return 1
+        return exits.UPLOAD_REFUSED
 
     host = pds_did(did)
     print(f"pds: {host}")
@@ -290,11 +294,11 @@ def main() -> int:
     if not args.create_post:
         print("\nNot posting. The blob is uploaded and will stay referencable.")
         print("To publish, re-run the same command with --create-post and --text \"...\"")
-        return 0
+        return exits.OK
 
     if not args.text.strip():
         print("refusing to publish an empty post; pass --text", file=sys.stderr)
-        return 2
+        return exits.EMPTY_POST_TEXT
 
     res = _req(
         f"{PDS}/xrpc/com.atproto.repo.createRecord",
@@ -303,7 +307,7 @@ def main() -> int:
     )
     rkey = res["uri"].rsplit("/", 1)[-1]
     print(f"posted: https://bsky.app/profile/{ident}/post/{rkey}")
-    return 0
+    return exits.OK
 
 
 if __name__ == "__main__":
