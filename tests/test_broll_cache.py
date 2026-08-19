@@ -124,3 +124,87 @@ def test_eviction_gets_under_the_cap_even_when_that_means_most_of_it(tmp_path):
 
 def test_eviction_survives_an_empty_cache(tmp_path):
     assert broll.evict(tmp_path, cap=10) == []
+
+
+# --- clip selection, which reached production untestable --------------------
+# Both of its failure modes shipped while 128 tests passed, because the loop
+# lived inside an argparse-to-exit-code main() that no test could call.
+
+import make_video  # noqa: E402
+
+
+class _Pick:
+    def __init__(self, ident, start=60.0):
+        self.identifier, self.start, self.collection = ident, start, "prelinger"
+
+
+class _Clip:
+    def __init__(self, ident):
+        self.identifier, self.path = ident, Path(f"/nonexistent/{ident}.mp4")
+
+
+def _wire(monkeypatch, *, unfetchable=(), peaks=None):
+    peaks = peaks or {}
+
+    def fetch(ident, collection="prelinger"):
+        if ident in unfetchable:
+            raise TimeoutError("archive.org said no")
+        return _Clip(ident)
+
+    monkeypatch.setattr(make_video.broll, "fetch", fetch)
+    monkeypatch.setattr(make_video.broll, "peak_dbfs",
+                        lambda p, **kw: peaks.get(Path(p).stem, -6.0))
+
+
+def test_a_silent_clip_is_skipped_rather_than_rendered(monkeypatch):
+    """The bug that put a soundless video in front of a stranger. The first
+    version detected the silence, printed the reason, and encoded it anyway —
+    the check changed the log line and nothing else."""
+    _wire(monkeypatch, peaks={"dead": -48.0})
+    got = make_video.select_clip([_Pick("dead"), _Pick("good")],
+                                 override_start=None, dur=8.0, want_audio=True)
+    assert got is not None and got[0].identifier == "good"
+
+
+def test_an_unfetchable_clip_is_skipped(monkeypatch):
+    """archive.org fails per item and for hours; pairing is deterministic, so
+    without this the affected post is wedged rather than delayed."""
+    _wire(monkeypatch, unfetchable={"gone"})
+    got = make_video.select_clip([_Pick("gone"), _Pick("good")],
+                                 override_start=None, dur=8.0, want_audio=True)
+    assert got is not None and got[0].identifier == "good"
+    assert got[2].startswith("drawn, fallback")
+
+
+def test_the_first_usable_clip_wins_and_is_not_labelled_a_fallback(monkeypatch):
+    _wire(monkeypatch)
+    got = make_video.select_clip([_Pick("good"), _Pick("other")],
+                                 override_start=None, dur=8.0, want_audio=True)
+    assert got[0].identifier == "good" and got[2] == "drawn"
+
+
+def test_silence_is_ignored_when_the_caller_asked_for_no_audio(monkeypatch):
+    """--silent means the bed was never wanted, so a quiet clip is not a defect."""
+    _wire(monkeypatch, peaks={"dead": -48.0})
+    got = make_video.select_clip([_Pick("dead")],
+                                 override_start=None, dur=8.0, want_audio=False)
+    assert got is not None and got[0].identifier == "dead"
+
+
+def test_selection_gives_up_rather_than_returning_something_unusable(monkeypatch):
+    """Returning a silent or missing clip would be worse than failing: the exit
+    code is the bot's whole failure channel, and CLIP_FETCH_FAILED is retryable."""
+    _wire(monkeypatch, peaks={"a": -50.0, "b": -49.0}, unfetchable={"c"})
+    assert make_video.select_clip([_Pick("a"), _Pick("b"), _Pick("c")],
+                                  override_start=None, dur=8.0, want_audio=True) is None
+
+
+def test_selection_is_bounded(monkeypatch):
+    """Past a few tries the far end is not having an item-level problem, and a
+    fourth 180 MB request will not help."""
+    tried = []
+    monkeypatch.setattr(make_video.broll, "fetch",
+                        lambda i, collection="prelinger": tried.append(i) or (_ for _ in ()).throw(TimeoutError()))
+    make_video.select_clip([_Pick(f"c{i}") for i in range(40)],
+                           override_start=None, dur=8.0, want_audio=True)
+    assert len(tried) == make_video.CLIP_TRIES

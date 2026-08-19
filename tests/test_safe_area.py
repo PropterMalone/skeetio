@@ -179,3 +179,60 @@ def test_a_realistic_handle_is_never_ellipsized():
             f"@{handle} is {d.textlength(f'@{handle}', font=f):.0f}px at {pt}pt "
             f"against a {IDENT_COL}px column — it will be cut"
         )
+
+
+def test_the_identity_block_clears_the_credit_vertically():
+    """Both live in the bottom strip, and a width budget alone is not enough.
+
+    Constraining the identity to a column beside the credit stopped them
+    overlapping but left the handle sitting at the credit's own height, 24px
+    away — legible, and reading as one crowded row rather than two separate
+    things. It also charged the display name for an obstacle well below it,
+    cutting names to 366px when 770 were free.
+
+    Asserted on the rendered frame rather than on the constants, because the
+    arithmetic being wrong is exactly the thing the constants would agree with.
+    """
+    import numpy as np
+
+    plate = Image.new("RGB", (CW, CH), (0, 0, 0))
+    clip = Clip("z", "A Film About Something Rather Long Indeed", "1955", Path("/nonexistent"),
+                "Prelinger Archives", "http://creativecommons.org/publicdomain/mark/1.0/")
+    quote = Attribution(
+        "hello world",
+        Author("post malone ergo propter malone", "proptermalone.bsky.social", did="did:plc:p"),
+    )
+    # Differential, not positional. The display name now legitimately runs into
+    # the right-hand columns *because* it sits above the credit, so splitting
+    # the strip by x would measure the fix as a failure. Rendering once without
+    # a credit and once with isolates each block's rows without assuming where
+    # either one lives.
+    strip = slice(SAFE[3] - PFP, SAFE[3])
+    band = slice(SAFE[0] + PFP, SAFE[2])
+
+    def rows(credit_lines) -> set[int]:
+        a = np.array(compose(plate, quote, credit_lines).convert("L"))
+        return set(np.nonzero(a[strip, band].max(axis=1) > 60)[0].tolist())
+
+    ident_rows = rows(("", ""))
+    both_rows = rows(clip.credit_lines)
+    cred_rows = both_rows - ident_rows
+
+    assert ident_rows and cred_rows, "expected ink from both blocks"
+    assert max(ident_rows) < min(cred_rows), (
+        f"identity ink reaches row {max(ident_rows)} and the credit starts at "
+        f"{min(cred_rows)} — they share a line and read as one crowded row"
+    )
+
+
+def test_a_real_display_name_is_not_truncated():
+    """The name that prompted this: 31 characters, 544px, against a column that
+    used to be 366 — so it rendered as 'post malone ergo pr…' on a real video."""
+    d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    font = load_font("Inter-SemiBold.ttf", 34)
+    name = "post malone ergo propter malone"
+    ix = SAFE[0] + PFP + PFP_GAP
+    assert d.textlength(name, font=font) <= SAFE[2] - ix, (
+        "the display name no longer fits even the full width, so the layout "
+        "cannot be sized to hold it"
+    )

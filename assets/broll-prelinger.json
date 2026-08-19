@@ -101,20 +101,6 @@
       "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
-      "identifier": "GeneralH1928",
-      "title": "General Health Habits",
-      "year": "1928",
-      "url": "https://archive.org/download/GeneralH1928/GeneralH1928.mp4",
-      "best_start": 57.3,
-      "motion": 0.2083,
-      "brightness": 0.5,
-      "contrast": 0.484,
-      "floor_calm": 0.305,
-      "detail": 0.0744,
-      "total": 3.126,
-      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
-    },
-    {
       "identifier": "DatingDo1949",
       "title": "Dating: Do's and Don'ts",
       "year": "1949",
@@ -182,20 +168,6 @@
       "floor_calm": 0.573,
       "detail": 0.1728,
       "total": 3.015,
-      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
-    },
-    {
-      "identifier": "tmp_50168",
-      "title": "San Francisco Earthquake footage",
-      "year": null,
-      "url": "https://archive.org/download/tmp_50168/tmp_50168.mp4",
-      "best_start": 398.9,
-      "motion": 0.1107,
-      "brightness": 0.476,
-      "contrast": 0.443,
-      "floor_calm": 0.687,
-      "detail": 0.0242,
-      "total": 3.013,
       "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
@@ -339,20 +311,6 @@
       "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {
-      "identifier": "DateWith1950",
-      "title": "Date With Your Family, A",
-      "year": "1950",
-      "url": "https://archive.org/download/DateWith1950/DateWith1950.mp4",
-      "best_start": 90.0,
-      "motion": 0.0507,
-      "brightness": 0.451,
-      "contrast": 0.435,
-      "floor_calm": 0.585,
-      "detail": 0.0565,
-      "total": 2.872,
-      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
-    },
-    {
       "identifier": "hindenberg_explodes",
       "title": "Hindenburg Explodes",
       "year": "1937",
@@ -378,20 +336,6 @@
       "floor_calm": 0.439,
       "detail": 0.081,
       "total": 2.862,
-      "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
-    },
-    {
-      "identifier": "CherryKnight",
-      "title": "Cherry Knight",
-      "year": null,
-      "url": "https://archive.org/download/CherryKnight/CherryKnight.mp4",
-      "best_start": 47.0,
-      "motion": 0.141,
-      "brightness": 0.38,
-      "contrast": 0.38,
-      "floor_calm": 0.552,
-      "detail": 0.0536,
-      "total": 2.86,
       "licenseurl": "http://creativecommons.org/licenses/publicdomain/"
     },
     {

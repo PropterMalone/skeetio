@@ -35,6 +35,48 @@ from skeet_frame import CH, CW, load_font, unsupported_chars
 CLIP_TRIES = 4
 
 
+def select_clip(picks, *, override_start, dur, want_audio):
+    """Walk this post's ranking until a clip can actually be used.
+
+    Returns (clip, in-point, how it was chosen), or None if nothing in the top
+    CLIP_TRIES qualifies.
+
+    Two reasons to fall through, and they are not the same kind of reason.
+    Unreachable is about the far end: archive.org fails per item and for hours,
+    ToNewHor1940 served 503 all afternoon while everything else answered, and
+    because pairing is deterministic a post that drew it was wedged rather than
+    delayed. Silent is about the clip itself and is a fixed property, so skipping
+    it stays deterministic where the availability skip does not.
+
+    Lifted out of main() so it can be tested at all. Both failures reached
+    production while a suite of 128 tests passed, because everything either of
+    them touches lived inside an argparse-to-exit-code function that no test
+    could call.
+    """
+    for n, pick in enumerate(picks[:CLIP_TRIES]):
+        try:
+            # Pass the pick's own collection: the pool is a merge, and without
+            # this every clip credited "Prelinger Archives" including NASA.
+            candidate = broll.fetch(pick.identifier, collection=pick.collection)
+        except (urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
+            print(f"{pick.identifier} unavailable ({type(e).__name__}) — "
+                  f"falling through to the next clip this post ranked", file=sys.stderr)
+            continue
+        at = override_start if override_start is not None else pick.start
+        if want_audio:
+            # Silence is grounds for falling through, not just for a log line.
+            # Detecting a dead track and then encoding it anyway is exactly how
+            # the first silent video reached a stranger: the check was added, the
+            # message changed, and the output did not.
+            peak = broll.peak_dbfs(candidate.path, start=at, dur=dur)
+            if peak is not None and peak < broll.SILENT_DBFS:
+                print(f"{pick.identifier} has no usable audio ({peak:.0f} dBFS) — "
+                      f"falling through to the next clip this post ranked", file=sys.stderr)
+                continue
+        return candidate, at, ("drawn" if n == 0 else f"drawn, fallback {n}")
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--post", required=True, help="bsky.app URL or at:// URI")
@@ -106,18 +148,6 @@ def main() -> int:
         )
         return exits.UNRENDERABLE_SCRIPT
 
-    # The clip download is the longest network operation here by a wide margin —
-    # up to ~180 MB from archive.org — and it had nothing around it, so a slow
-    # far end escaped as a traceback and a bare exit 1. That is in none of the
-    # documented groups, which left a caller dispatching on the tens digit with
-    # no defined behaviour for the failure it will see most often.
-    # The clip download is the longest network operation here by a wide margin —
-    # up to ~180 MB from archive.org — and it fails at the level of a single
-    # item: ToNewHor1940 served 503 for hours while every other item answered
-    # normally. Because pairing is deterministic, a post that drew that clip was
-    # not delayed but wedged, so the draw walks down this post's own ranking
-    # until something can actually be fetched.
-    clip = None
     if args.clip:
         try:
             clip = broll.fetch(args.clip, collection=args.collection)
@@ -129,25 +159,14 @@ def main() -> int:
         start = args.start if args.start is not None else 60.0
         source = "specified"
     else:
-        picks = pair.ranked(sk.uri, pair.load())
-        for n, pick in enumerate(picks[:CLIP_TRIES]):
-            try:
-                # Pass the pick's own collection: the pool is a merge, and
-                # without this every clip credited "Prelinger Archives"
-                # including NASA.
-                clip = broll.fetch(pick.identifier, collection=pick.collection)
-            except (urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
-                print(f"{pick.identifier} unavailable ({type(e).__name__}) — "
-                      f"falling through to the next clip this post ranked",
-                      file=sys.stderr)
-                continue
-            start = args.start if args.start is not None else pick.start
-            source = "drawn" if n == 0 else f"drawn, fallback {n}"
-            break
-        if clip is None:
-            print(f"none of this post's top {CLIP_TRIES} clips could be fetched",
-                  file=sys.stderr)
+        picked = select_clip(
+            pair.ranked(sk.uri, pair.load()),
+            override_start=args.start, dur=args.dur, want_audio=not args.silent,
+        )
+        if picked is None:
+            print(f"none of this post's top {CLIP_TRIES} clips could be used", file=sys.stderr)
             return exits.CLIP_FETCH_FAILED
+        clip, start, source = picked
 
     if not clip.public_domain:
         # Library clips were screened at curation, but --clip takes any

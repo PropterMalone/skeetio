@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import exits  # noqa: E402
 import ledger  # noqa: E402
 import post as P  # noqa: E402
-from publish import PDS, _req, login, read_env  # noqa: E402
+from publish import PDS, ApiError, _req, login, read_env  # noqa: E402
 
 RENDER = Path(__file__).resolve().parent
 
@@ -211,35 +211,52 @@ def handle(note: dict, opts, token: str) -> None:
 
     try:
         request = P.fetch(uri)
-    except (urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
+    except (ApiError, urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
         print(f"{uri}: cannot read the request ({e}) — leaving it for the next pass")
         return
 
-    # Removal first. It must work when rendering does not.
-    if wants_removal(request.text, opts.bot_handle) and request.reply_parent_uri:
-        row = ledger.find_reply(request.reply_parent_uri)
-        if row and ledger.may_remove(row, actor):
-            if opts.dry_run:
-                print(f"  --dry-run: would delete {row['reply_uri']}")
-            else:
-                _req(
-                    f"{PDS}/xrpc/com.atproto.repo.deleteRecord",
-                    method="POST", token=token, ctype="application/json",
-                    body=json.dumps({
-                        "repo": opts.bot_did, "collection": "app.bsky.feed.post",
-                        "rkey": row["reply_uri"].rsplit("/", 1)[-1],
-                    }).encode(),
-                )
+    # Removal first: it must work when rendering does not. But the branch is
+    # entered only when the parent really is one of our own videos, not merely
+    # because the word appeared. Testing the wording alone meant any ordinary
+    # request containing "remove" or "delete" — "@skeetio delete this from my
+    # memory" on a normal post — took this path, matched no ledger row, returned
+    # without recording anything, and was re-read every three minutes forever.
+    row = ledger.find_reply(request.reply_parent_uri) if request.reply_parent_uri else None
+    if row and wants_removal(request.text, opts.bot_handle):
+        if not ledger.may_remove(row, actor):
+            # Silence toward them, but recorded: telling a stranger they are not
+            # allowed invites them to work out who is, while writing nothing at
+            # all would re-offer the request on every pass.
             ledger.append(ledger.Row(
-                outcome="removed", request_uri=uri, requester_did=actor,
+                outcome="refused", request_uri=uri, requester_did=actor,
                 source_uri=row.get("source_uri", ""), source_did=row.get("source_did", ""),
-                at=ledger.now(), reply_uri=row["reply_uri"], note="asked in thread",
+                at=ledger.now(), reply_uri=row["reply_uri"], note="not theirs to remove",
             ))
-            print(f"  removed {row['reply_uri']} at {actor}'s request")
-        elif row:
-            # Silence, not a refusal. Telling a stranger "you are not allowed to
-            # delete this" invites them to work out who is.
             print(f"  {actor} asked to remove {row['reply_uri']} and may not — ignoring")
+            return
+
+        if opts.dry_run:
+            # Nothing is written either. A dry run that appends a terminal row
+            # consumes the request permanently and can record a takedown that
+            # never happened — after which retract.py reports nothing to remove
+            # for a video that is still up.
+            print(f"  --dry-run: would delete {row['reply_uri']}, writing nothing")
+            return
+
+        _req(
+            f"{PDS}/xrpc/com.atproto.repo.deleteRecord",
+            method="POST", token=token, ctype="application/json",
+            body=json.dumps({
+                "repo": opts.bot_did, "collection": "app.bsky.feed.post",
+                "rkey": row["reply_uri"].rsplit("/", 1)[-1],
+            }).encode(),
+        )
+        ledger.append(ledger.Row(
+            outcome="removed", request_uri=uri, requester_did=actor,
+            source_uri=row.get("source_uri", ""), source_did=row.get("source_did", ""),
+            at=ledger.now(), reply_uri=row["reply_uri"], note="asked in thread",
+        ))
+        print(f"  removed {row['reply_uri']} at {actor}'s request")
         return
 
     if request.stands_alone:
@@ -252,7 +269,7 @@ def handle(note: dict, opts, token: str) -> None:
 
     try:
         source = P.fetch(request.reply_parent_uri)
-    except (urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
+    except (ApiError, urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
         print(f"{uri}: cannot read the post above it ({e}) — leaving it")
         return
 
@@ -351,10 +368,16 @@ def poll(opts, token: str) -> int:
     for note in fresh:
         try:
             handle(note, opts, token)
-        except urllib.error.HTTPError as e:
+        except ApiError as e:
             # One bad request must not end the pass. Nothing was marked terminal
             # for it, so the next pass picks it up again.
-            print(f"{note.get('uri')}: {e.code} {e.read()[:200]!r}", file=sys.stderr)
+            #
+            # ApiError and not HTTPError: _req converts one into the other, so a
+            # handler listening for HTTPError here could never run. Every guard
+            # in this file had that shape, which meant an expired app password
+            # killed the bot silently every three minutes — cron only alerts on
+            # a 3x exit and an uncaught RuntimeError exits 1.
+            print(f"{note.get('uri')}: {e.code} {e.body[:200]}", file=sys.stderr)
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             print(f"{note.get('uri')}: {e}", file=sys.stderr)
     return len(fresh)
@@ -393,7 +416,7 @@ def main() -> int:
 
     try:
         sess = login(ident, pw)
-    except (urllib.error.URLError, TimeoutError, OSError, KeyError) as e:
+    except (ApiError, urllib.error.URLError, TimeoutError, OSError, KeyError) as e:
         print(f"could not log in as {ident}: {e}", file=sys.stderr)
         return exits.FETCH_FAILED
     opts.bot_did, opts.bot_handle = sess["did"], sess.get("handle", ident)

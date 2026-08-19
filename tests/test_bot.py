@@ -186,6 +186,7 @@ class _Opts:
     expect_account = None
     dur = 10.0
     generic = False
+    limit = 25
 
 
 @pytest.fixture(autouse=True)
@@ -281,34 +282,94 @@ def test_a_permanent_failure_answers_and_closes(monkeypatch):
 
 def test_an_unauthorised_takedown_deletes_nothing(monkeypatch):
     """The mechanism takes orders from a mention, so this is the branch that
-    stops any passer-by removing someone else's video."""
+    stops any passer-by removing someone else's video.
+
+    It must still *record* the refusal. Writing nothing looks tidier and means
+    the request is re-read on every pass, forever."""
     ledger.append(ledger.Row(outcome="posted", request_uri=REQ_URI, requester_did=ASKER,
                              source_uri=SRC_URI, source_did=AUTHOR, at=ledger.now(),
                              reply_uri="at://bot/vid"))
     monkeypatch.setattr(bot.P, "fetch", lambda u: _post(
         "at://did:plc:nobody/app.bsky.feed.post/r2", "did:plc:nobody",
         "@skeetio remove", parent="at://bot/vid"))
+    calls = []
+    monkeypatch.setattr(bot, "_req", lambda url, **kw: calls.append(url) or {})
 
-    bot.handle(_note(uri="at://did:plc:nobody/app.bsky.feed.post/r2", did="did:plc:nobody"),
-               _Opts(), "token")
+    class Live(_Opts):
+        dry_run = False
 
-    assert [r["outcome"] for r in ledger.rows()] == ["posted"], (
-        "a stranger's remove request changed the ledger"
+    note = _note(uri="at://did:plc:nobody/app.bsky.feed.post/r2", did="did:plc:nobody")
+    bot.handle(note, Live(), "token")
+
+    assert not calls, "a stranger's remove request reached the network"
+    assert "removed" not in [r["outcome"] for r in ledger.rows()]
+    assert ledger.handled(note["uri"], now=9e9), (
+        "the refusal was not recorded, so it will be re-read on every pass forever"
     )
 
 
 @pytest.mark.parametrize("actor", [AUTHOR, ASKER])
 def test_the_author_and_the_requester_can_each_take_it_down(monkeypatch, actor):
+    """Run live against a captured transport, not in --dry-run. The earlier
+    version of this test ran dry and asserted that a `removed` row appeared —
+    which is to say it asserted the dry-run ledger leak as the specification."""
+    ledger.append(ledger.Row(outcome="posted", request_uri=REQ_URI, requester_did=ASKER,
+                             source_uri=SRC_URI, source_did=AUTHOR, at=ledger.now(),
+                             reply_uri="at://did:plc:bot/app.bsky.feed.post/vid"))
+    monkeypatch.setattr(bot.P, "fetch", lambda u: _post(
+        "at://x/app.bsky.feed.post/r2", actor, "@skeetio remove",
+        parent="at://did:plc:bot/app.bsky.feed.post/vid"))
+    calls = []
+    monkeypatch.setattr(bot, "_req", lambda url, **kw: calls.append(url) or {})
+
+    class Live(_Opts):
+        dry_run = False
+
+    bot.handle(_note(uri="at://x/app.bsky.feed.post/r2", did=actor), Live(), "token")
+
+    assert calls and calls[0].endswith("deleteRecord"), "nothing was deleted"
+    assert ledger.rows()[-1]["outcome"] == "removed"
+    assert ledger.live_for_source(AUTHOR) == []
+
+
+def test_a_dry_run_neither_deletes_nor_records(monkeypatch):
+    """A dry run that appends a terminal row consumes the request permanently and
+    can record a takedown that never happened — after which retract.py reports
+    nothing to remove for a video that is still up. The whole point of --dry-run
+    is that the world is unchanged afterwards."""
     ledger.append(ledger.Row(outcome="posted", request_uri=REQ_URI, requester_did=ASKER,
                              source_uri=SRC_URI, source_did=AUTHOR, at=ledger.now(),
                              reply_uri="at://bot/vid"))
+    before = len(ledger.rows())
     monkeypatch.setattr(bot.P, "fetch", lambda u: _post(
-        "at://x/app.bsky.feed.post/r2", actor, "@skeetio remove", parent="at://bot/vid"))
+        "at://x/app.bsky.feed.post/r2", AUTHOR, "@skeetio remove", parent="at://bot/vid"))
 
-    bot.handle(_note(uri="at://x/app.bsky.feed.post/r2", did=actor), _Opts(), "token")
+    note = _note(uri="at://x/app.bsky.feed.post/r2", did=AUTHOR)
+    bot.handle(note, _Opts(), "token")          # _Opts.dry_run is True
 
-    assert ledger.rows()[-1]["outcome"] == "removed"
-    assert ledger.live_for_source(AUTHOR) == []
+    assert len(ledger.rows()) == before, "a dry run wrote to the ledger"
+    assert not ledger.handled(note["uri"], now=9e9), (
+        "a dry run consumed the request, so the real pass will never serve it"
+    )
+
+
+def test_a_render_request_mentioning_deletion_still_renders(monkeypatch):
+    """The removal branch used to trigger on the wording alone. Any ordinary
+    request containing 'remove' or 'delete' took that path, matched no ledger
+    row, returned having written nothing, and was re-read every three minutes
+    forever. Detection signal that it had not yet fired in production: the cron
+    log still read `0 unanswered`."""
+    monkeypatch.setattr(bot.P, "fetch", lambda u: (
+        _post(REQ_URI, ASKER, "@skeetio delete this from my memory please", parent=SRC_URI)
+        if u == REQ_URI else _post(SRC_URI, AUTHOR, "words worth rendering")))
+    rendered = []
+    monkeypatch.setattr(bot, "render_and_reply",
+                        lambda *a: (rendered.append(1), (exits.OK, {}))[1])
+
+    bot.handle(_note(), _Opts(), "token")
+
+    assert rendered, "a render request was swallowed by the removal branch"
+    assert [r["outcome"] for r in ledger.rows()] == ["claimed", "posted"]
 
 
 def test_an_authorised_takedown_actually_calls_deleteRecord(monkeypatch):
@@ -413,4 +474,70 @@ def test_an_operator_error_stops_the_bot_rather_than_the_request(monkeypatch, co
     outcomes = [r["outcome"] for r in ledger.rows()]
     assert "refused" not in outcomes and "failed" not in outcomes, (
         f"an operator error was recorded against the request: {outcomes}"
+    )
+
+
+# --- the boundary itself, which every other test in this file stubs ---------
+# C1 survived a 128-test suite because `_req` is monkeypatched in every one of
+# them. The suite exercised the logic *between* the boundaries and never the
+# boundaries themselves, so an `except` clause naming an exception that can no
+# longer arrive looked exactly like a working guard.
+
+
+def test_every_api_guard_catches_what_req_actually_raises():
+    """_req converts urllib's HTTPError into publish.ApiError, which is a
+    RuntimeError — disjoint from HTTPError and from OSError. Any handler here
+    listening for the old type is unreachable code that reads as a guard.
+
+    Checked against the source rather than by triggering each path: reaching all
+    of them for real needs a live server returning specific statuses, which is
+    how they went unexercised in the first place.
+    """
+    import ast
+    import urllib.error
+
+    from publish import ApiError
+
+    assert not issubclass(ApiError, urllib.error.HTTPError)
+    assert not issubclass(ApiError, OSError), (
+        "ApiError became an OSError subclass — the guards below are now "
+        "accidentally correct, and this test no longer proves anything"
+    )
+
+    offenders = []
+    for mod in ("bot.py", "retract.py"):
+        src = (Path(__file__).resolve().parent.parent / "render" / mod).read_text()
+        for node in ast.walk(ast.parse(src)):
+            if not isinstance(node, ast.ExceptHandler) or node.type is None:
+                continue
+            names = [n.attr if isinstance(n, ast.Attribute) else getattr(n, "id", "")
+                     for n in ast.walk(node.type) if isinstance(n, (ast.Name, ast.Attribute))]
+            # A handler that expects a failed API call must name ApiError.
+            if "HTTPError" in names and "ApiError" not in names:
+                offenders.append(f"{mod}:{node.lineno} catches HTTPError without ApiError")
+    assert not offenders, (
+        "these guards cannot fire — _req raises ApiError, not HTTPError: " + "; ".join(offenders)
+    )
+
+
+def test_an_api_failure_is_caught_rather_than_killing_the_pass(monkeypatch):
+    """The operational consequence of C1: an expired app password made every
+    poll die with an uncaught RuntimeError, exiting 1. bot-cron.sh only alerts
+    on a 3x exit, so the bot stopped answering anyone and said nothing."""
+    from publish import ApiError
+
+    def boom(*a, **k):
+        raise ApiError("POST", "/xrpc/com.atproto.repo.createRecord", 401, "ExpiredToken")
+
+    monkeypatch.setattr(bot.P, "fetch", lambda u: _post(REQ_URI, ASKER, "@skeetio do it"))
+    monkeypatch.setattr(bot, "_req", boom)
+    monkeypatch.setattr(bot, "get", lambda *a, **k: {"notifications": [_note()]})
+
+    class Live(_Opts):
+        dry_run = False
+
+    # poll() must survive it; the request stays unrecorded so the next pass retries.
+    bot.poll(Live(), "token")
+    assert not ledger.handled(REQ_URI, now=9e9), (
+        "a transient API failure permanently consumed the request"
     )

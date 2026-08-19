@@ -29,6 +29,26 @@
       "identifier": "NewOrlea1941",
       "reason": "audio dead (-48 dBFS peak over the span a render uses)",
       "decision": "excluded 2026-08-19 \u2014 shipped a silent video to a stranger's request. The archival sound arriving free with the picture is what closed the silent-video problem; a dead track reopens it while looking like success."
+    },
+    {
+      "identifier": "GeneralH1928",
+      "reason": "audio dead (-48.3 dBFS at the pairing in-point)",
+      "decision": "excluded 2026-08-19 \u2014 full-library audio audit. Same failure as NewOrlea1941."
+    },
+    {
+      "identifier": "tmp_50168",
+      "reason": "audio dead (-55.5 dBFS at the pairing in-point)",
+      "decision": "excluded 2026-08-19 \u2014 full-library audio audit. The identifier is also junk: 'tmp_50168' is a scratch name, so this should not have entered the library at all."
+    },
+    {
+      "identifier": "DateWith1950",
+      "reason": "audio too quiet (-24.5 dBFS)",
+      "decision": "excluded 2026-08-19 \u2014 below the -18 dBFS curation bar; the bed is ducked another 6 dB, so it lands near -30 in the mix."
+    },
+    {
+      "identifier": "CherryKnight",
+      "reason": "audio too quiet (-21.5 dBFS)",
+      "decision": "excluded 2026-08-19 \u2014 below the -18 dBFS curation bar."
     }
   ]
 }

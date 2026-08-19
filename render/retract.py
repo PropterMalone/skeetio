@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import exits  # noqa: E402
 import ledger  # noqa: E402
 import post as P  # noqa: E402
-from publish import PDS, _req, login, read_env  # noqa: E402
+from publish import PDS, ApiError, _req, login, read_env  # noqa: E402
 
 
 def delete_record(uri: str, token: str) -> None:
@@ -71,7 +71,7 @@ def main() -> int:
     else:
         try:
             did = args.source if args.source.startswith("did:") else P.resolve_actor(args.source)
-        except (urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
+        except (ApiError, urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
             print(f"could not resolve {args.source}: {e}", file=sys.stderr)
             return exits.FETCH_FAILED
         targets = ledger.live_for_source(did)
@@ -100,7 +100,7 @@ def main() -> int:
 
     try:
         sess = login(ident, pw)
-    except (urllib.error.URLError, TimeoutError, OSError, KeyError) as e:
+    except (ApiError, urllib.error.URLError, TimeoutError, OSError, KeyError) as e:
         print(f"could not log in: {e}", file=sys.stderr)
         return exits.FETCH_FAILED
 
@@ -108,11 +108,15 @@ def main() -> int:
         uri = t["reply_uri"]
         try:
             delete_record(uri, sess["accessJwt"])
-        except urllib.error.HTTPError as e:
+        except ApiError as e:
             # A record that is already gone is the outcome we wanted. Anything
             # else stops the run rather than continuing down the list — if the
             # first delete failed for a reason that is not "already deleted",
             # the rest will fail the same way.
+            #
+            # ApiError and not HTTPError: _req raises the former, so this whole
+            # branch was unreachable and a bulk takedown crashed on the first
+            # already-removed record, leaving every later one live.
             if e.code not in (400, 404):
                 print(f"{uri}: delete refused ({e.code})", file=sys.stderr)
                 return exits.UPLOAD_REFUSED

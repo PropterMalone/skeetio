@@ -20,6 +20,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps
 
+import cadence
 from skeet_frame import SAFE, Attribution, circle_avatar, ellipsize, fit_text, load_font
 
 
@@ -142,9 +143,24 @@ def scrim(frame: Image.Image, *, strength: float = 0.44, warm: bool = True) -> I
     return Image.composite(frame, base, grad)
 
 
-@functools.lru_cache(maxsize=16)
+def _line_x(drawn: str, anchor: str, font, w: int, align_centre: bool) -> float:
+    """Where a line starts.
+
+    Centred on the width of the line *when complete*, not on what is drawn so
+    far. Words arrive one at a time, so centring each partial line on itself
+    would slide every word already on screen leftward as the next one landed —
+    the type would crawl rather than appear.
+    """
+    if not align_centre:
+        return SAFE[0]
+    d = ImageDraw.Draw(Image.new("L", (1, 1)))
+    return (w - d.textlength(anchor or drawn, font=font)) / 2
+
+
+@functools.lru_cache(maxsize=64)
 def _halo(
     lines: tuple[str, ...],
+    anchors: tuple[str, ...],
     font_path: str,
     font_size: int,
     line_h: int,
@@ -156,20 +172,23 @@ def _halo(
 ) -> Image.Image:
     """The blurred dark halo behind the type.
 
-    Keyed on the lines rather than the frame: `reveal` only changes how many
-    lines are shown, so a 240-frame render has 3-10 distinct halos and used to
-    pay a full-frame Gaussian blur — the single most expensive thing in compose()
-    — for every one of them. Never mutated by the caller, which only composites
-    it.
+    Keyed on the lines rather than the frame, because a full-frame Gaussian blur
+    is the single most expensive thing in compose() and the reveal changes the
+    text far less often than it changes the frame. Word-paced reveal makes that
+    caching matter more, not less: a 192-frame render now has one distinct halo
+    per word — a few dozen — where it had one per line. Cutting only at word
+    boundaries is what keeps that bounded; a per-character reveal would rebuild
+    the blur on nearly every frame. Never mutated by the caller, which only
+    composites it.
     """
     font = load_font(Path(font_path).name, font_size)
     halo = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     hd = ImageDraw.Draw(halo)
     y = top
-    for line in lines:
-        lw = hd.textlength(line, font=font)
-        x = (w - lw) / 2 if align_centre else SAFE[0]
-        hd.text((x, y), line, font=font, fill=(*ink_shadow, 210))
+    for i, line in enumerate(lines):
+        anchor = anchors[i] if i < len(anchors) else line
+        hd.text((_line_x(line, anchor, font, w, align_centre), y),
+                line, font=font, fill=(*ink_shadow, 210))
         y += line_h
     return halo.filter(ImageFilter.GaussianBlur(18))
 
@@ -183,25 +202,30 @@ def glow_text(
     mood: Mood,
     *,
     align_centre: bool = True,
+    anchors: tuple[str, ...] | None = None,
 ) -> None:
     """Draw type over footage so it stays legible on any frame.
 
     Two devices, both necessary: a blurred dark halo behind the glyphs handles
     bright patches, and a thin stroke handles high-frequency detail that a soft
     halo alone cannot separate from.
+
+    `anchors` are the same lines complete, used only for horizontal placement so
+    a partially-revealed line sits where it will finish.
     """
     w, h = img.size
+    anchors = tuple(anchors) if anchors else tuple(lines)
     img.alpha_composite(
-        _halo(tuple(lines), font.path, font.size, line_h, top, w, h, mood.ink_shadow, align_centre)
+        _halo(tuple(lines), anchors, font.path, font.size, line_h, top, w, h,
+              mood.ink_shadow, align_centre)
     )
 
     d = ImageDraw.Draw(img)
     y = top
-    for line in lines:
-        lw = d.textlength(line, font=font)
-        x = (w - lw) / 2 if align_centre else SAFE[0]
+    for i, line in enumerate(lines):
+        anchor = anchors[i] if i < len(anchors) else line
         d.text(
-            (x, y),
+            (_line_x(line, anchor, font, w, align_centre), y),
             line,
             font=font,
             fill=mood.ink,
@@ -221,10 +245,17 @@ def compose(
 ) -> Image.Image:
     """One finished frame: scrimmed footage, type, author, credit.
 
-    `reveal` is the fraction of lines shown, so the caller can pace the text in
-    rather than dumping it — the wait is the retention mechanic the whole format
-    borrows from the nodding-head trick. With the creature parked it is also the
-    only thing in the frame that changes, apart from the footage itself.
+    `reveal` is how far through the reveal window the frame sits, 0 to 1. What
+    that shows is decided by cadence.py, which paces the words the way someone
+    reading aloud would — a beat at a comma, longer at a full stop. It used to be
+    a fraction of *lines*, which paused wherever the column width happened to
+    break: on a real post that meant pausing after "how", after "how to", and
+    after "I", while every actual phrase ending sat mid-line and got nothing.
+
+    The wait is the retention mechanic the whole format borrows from the
+    nodding-head trick. With the creature parked it is also the only thing in the
+    frame that changes, apart from the footage itself, which is why it is worth
+    getting right.
 
     There is no avatar parameter. The picture arrives inside `quote`, because a
     face passed beside a name is the same hazard as text passed beside a handle,
@@ -240,11 +271,14 @@ def compose(
         quote.text, "EBGaramond-SemiBold.ttf", box, d, lo=46, hi=118, leading=1.2
     )
 
-    shown = max(1, round(len(lines) * max(0.0, min(1.0, reveal))))
+    # The block is positioned from the *complete* text, so nothing moves as the
+    # reveal proceeds — words appear into the layout the finished frame will have
+    # rather than the type drifting upward as lines arrive.
     block_h = line_h * len(lines)
     top = SAFE[1] + max(0, (text_bottom - SAFE[1] - block_h) // 2)
 
-    glow_text(img, lines[:shown], font, line_h, top, mood)
+    shown = cadence.visible(tuple(lines), max(0.0, min(1.0, reveal)))
+    glow_text(img, list(shown), font, line_h, top, mood, anchors=tuple(lines))
 
     # The author, bottom-left: their picture and their name, together, at the
     # corner of the safe area. This replaced a centred hairline rule and handle,
@@ -252,68 +286,105 @@ def compose(
     # nothing left to dodge.
     img.alpha_composite(_identity_disc(quote, PFP, mood), (SAFE[0], disc_top))
 
-    nf = load_font("Inter-SemiBold.ttf", 34)
-    ix = SAFE[0] + PFP + PFP_GAP
+    # Credit first, because it is the fixed obstacle and the identity block has
+    # to be laid out around what it *actually* occupies.
+    #
+    # It used to sit centred at CH-46 — 314px BELOW the safe area, directly under
+    # the Shorts progress bar, so the one line naming the source and asserting
+    # public domain was invisible on the surface we launch on. It cannot simply
+    # move up as a centred line either: at 24px the median credit is 711px wide.
+    # Hence two lines, right-aligned, smaller.
+    cf = load_font("Inter-Regular.ttf", CREDIT_PT)
+    credit_lines = list(credit)
+    # The rights statement makes a legal claim, so it is never ellipsized —
+    # CREDIT_COL is wide enough to hold it outright. A long archival title is the
+    # line that gives.
+    credit_lines[0] = ellipsize(credit_lines[0], cf, CREDIT_COL, d)
+    credit_lh = int(CREDIT_PT * 1.28)
+    credit_top = SAFE[3] - credit_lh * len(credit_lines)
+    credit_w = max(d.textlength(ln, font=cf) for ln in credit_lines)
 
-    # The handle is the attribution, so it is not the line that gives — the same
-    # argument the rights line gets. A fixed size cannot cover the range:
-    # "@a.bsky.social" is 198px at 28pt and "@averylongishhandle.bsky.social" is
-    # 440px, against a 366px column. So it shrinks to fit rather than being cut,
-    # and only a genuinely absurd handle reaches the floor and gets ellipsized.
-    # The display name is what truncates, which is the right order — a shortened
-    # name is cosmetic, a shortened handle points at the wrong account.
-    handle = f"@{quote.author.handle}"
-    for pt in range(28, 19, -2):
-        hf = load_font("Inter-Regular.ttf", pt)
-        if d.textlength(handle, font=hf) <= IDENT_COL:
-            break
+    ix = SAFE[0] + PFP + PFP_GAP
+    full_w = SAFE[2] - ix                                   # nothing in the way
+    clear_w = int(SAFE[2] - credit_w - CREDIT_GUTTER - ix)   # beside the credit
+
+    def budget(top: float, height: float) -> int:
+        """How wide a line at this height may be.
+
+        The credit is bottom-anchored and only two lines tall, so it occupies the
+        floor of this strip and not the whole of it. Reserving its column against
+        *every* identity line — which is what a single IDENT_COL constant does —
+        charged the display name for an obstacle sitting well below it, and cut
+        names to 366px when 770 were free. Measured per line instead: there is no
+        virtue in two videos laying out identically, only in each one looking
+        right.
+        """
+        return full_w if top + height <= credit_top else clear_w
+
+    nf = load_font("Inter-SemiBold.ttf", 34)
 
     # An account with no display name is reported by the AppView with its handle
     # *as* the display name, so drawing both prints the same string twice, one
-    # line above the other, looking like a bug in the renderer. Anyone who never
-    # set a display name gets this, which is a lot of people.
+    # line above the other, looking like a bug in the renderer.
     display = (quote.author.display_name or "").strip()
-    stacked = display and display.lstrip("@") != quote.author.handle
+    stacked = bool(display) and display.lstrip("@") != quote.author.handle
+    handle = f"@{quote.author.handle}"
 
     # Secondary type needs the same halo as the body. Without it the handle
     # survives on dark plates and disappears on bright ones, which is the worst
     # of both — it looks like a rendering fault rather than a choice.
     shadow = {"stroke_width": 2, "stroke_fill": (*mood.ink_shadow, 210)}
+
+    def place(height: int) -> int:
+        """Top edge for an identity block of this height.
+
+        Centred in the band *above* the credit when it fits there, rather than
+        on the disc. Centring on the disc put the handle at the credit's own
+        height: they never overlapped — the width budget saw to that — but they
+        sat 24px apart on one line and read as a single crowded row rather than
+        two separate things. Lifting the block clears the credit outright, which
+        also hands both lines the full width instead of the column beside it.
+
+        Falls back to centring on the disc when the credit is tall enough that
+        there is no band to sit in, at which point the width budget takes over
+        again and the layout degrades to the previous, still-correct, behaviour.
+        """
+        band = credit_top - disc_top
+        if height + 12 <= band:
+            return disc_top + (band - height) // 2
+        return disc_top + (PFP - height) // 2
+
     if stacked:
-        iy = disc_top + (PFP - 78) // 2
-        d.text((ix, iy), ellipsize(display, nf, IDENT_COL, d),
+        iy = place(78)
+        hw = budget(iy + 44, 28)
+        # The handle is the attribution and never gets cut — the same argument
+        # the rights line gets — so it shrinks to whatever width it has. The
+        # display name is the line allowed to ellipsize: a shortened name is
+        # cosmetic, a shortened handle points at an account that is not theirs.
+        for pt in range(28, 19, -2):
+            hf = load_font("Inter-Regular.ttf", pt)
+            if d.textlength(handle, font=hf) <= hw:
+                break
+        d.text((ix, iy), ellipsize(display, nf, budget(iy, 34), d),
                font=nf, fill=mood.ink, **shadow)
-        d.text((ix, iy + 44), ellipsize(handle, hf, IDENT_COL, d),
+        d.text((ix, iy + 44), ellipsize(handle, hf, hw, d),
                font=hf, fill=mood.credit, **shadow)
     else:
-        # One line, optically centred on the disc rather than on its box.
-        # No display name: the handle carries the line alone, so it gets the
-        # heavier face at whatever size it fitted at.
-        solo = load_font("Inter-SemiBold.ttf", hf.size)
-        d.text((ix, disc_top + (PFP - hf.size) // 2 - 6),
-               ellipsize(handle, solo, IDENT_COL, d),
-               font=solo, fill=mood.ink, **shadow)
+        # Alone it carries the block, so it takes the heavier face.
+        iy = place(34)
+        sw = budget(iy, 34)
+        for pt in range(34, 21, -2):
+            sf = load_font("Inter-SemiBold.ttf", pt)
+            if d.textlength(handle, font=sf) <= sw:
+                break
+        d.text((ix, iy), ellipsize(handle, sf, sw, d), font=sf, fill=mood.ink, **shadow)
 
-    # Credit, right-aligned and bottom-aligned to the safe area. It used to sit
-    # centred at CH-46 — 314px BELOW the safe area, directly under the Shorts
-    # progress bar, so the one line naming the source and asserting public
-    # domain was invisible on the surface we launch on.
-    #
-    # It cannot simply move up as a centred line: at 24px the median credit is
-    # 711px wide and the widest 1186px. Hence two lines, right-aligned, smaller.
-    cf = load_font("Inter-Regular.ttf", CREDIT_PT)
-    lines = list(credit)
-    # The rights statement is the line making a legal claim, so it is never
-    # ellipsized — CREDIT_COL is reserved wide enough to hold it outright. A
-    # long archival title is the line that gives.
-    lines[0] = ellipsize(lines[0], cf, CREDIT_COL, d)
-    line_h = int(CREDIT_PT * 1.28)
-    y = SAFE[3] - line_h * len(lines)
-    for line in lines:
+    y = credit_top
+    for line in credit_lines:
         lw = d.textlength(line, font=cf)
         d.text(
             (SAFE[2] - lw, y), line, font=cf, fill=(*mood.credit, 235),
             stroke_width=2, stroke_fill=(*mood.ink_shadow, 210),
         )
-        y += line_h
+        y += credit_lh
     return img.convert("RGB")
