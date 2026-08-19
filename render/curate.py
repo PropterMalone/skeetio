@@ -1,11 +1,13 @@
 # pattern: Imperative Shell
 """Score public-domain clips for use as skeet backdrops, and emit a library.
 
-Not every clip composites. The figure stands in the bottom third and the type
-sits across the middle, so a clip is good here when it *moves*, is bright enough
-to survive a scrim, and is quiet exactly where things get placed on top of it.
-Talking heads, title cards, and dense text frames all fail despite being fine
-films.
+Not every clip composites. The author's picture, handle and the credit sit in
+the bottom third and the type runs across the middle, so a clip is good here
+when it *moves*, is bright enough to survive a scrim, and is quiet exactly where
+things get placed on top of it. Talking heads, title cards, and dense text
+frames all fail despite being fine films. It also needs audible sound: the
+archival audio arrives free with the picture, and that is what keeps these from
+being silent videos.
 
 Scoring streams a handful of frames directly off archive.org with ffmpeg's HTTP
 seek, so vetting a hundred candidates costs a few megabytes rather than a few
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import re as _re
@@ -202,6 +205,21 @@ def score_clip(identifier: str, *, probes: int = 5, admit: bool = False) -> Scor
         )
         return None
 
+    # Audio, screened as a quality bar rather than a correctness one. The
+    # renderer has its own -35 dBFS floor for tracks that are outright dead;
+    # this is stricter because the bed is ducked ~6 dB on the way in, so a clip
+    # peaking at -20 lands near -26 in the mix — audible on a measurement,
+    # inaudible on a phone. Two thresholds because they answer different
+    # questions: "is this broken" and "is this good enough to keep".
+    #
+    # Screened here and not at render time because a clip's loudness is a fixed
+    # property, so keeping it out of the library leaves pairing deterministic.
+    peak = _peak_via_url(url)
+    if peak is not None and peak < AUDIO_FLOOR_DBFS:
+        print(f"      EXCLUDED (audio {peak:.0f} dBFS, below the {AUDIO_FLOOR_DBFS:.0f} bar): "
+              f"{str(title_for_screen)[:40]}", flush=True)
+        return None
+
     best: tuple[float, float, dict] | None = None
     for i in range(probes):
         t = dur * (0.15 + 0.7 * (i / max(1, probes - 1)))
@@ -219,7 +237,11 @@ def score_clip(identifier: str, *, probes: int = 5, admit: bool = False) -> Scor
         ) / 255.0
         brightness = float(grey.mean()) / 255.0
         contrast = float(grey.std()) / 128.0
-        # The bottom third carries the figure; reward a quiet, even floor.
+        # The bottom third carries the author's picture, their handle and the
+        # credit line; reward a quiet, even floor. This was originally scored
+        # because the creature stood there — the creature is parked, but the
+        # lower third is if anything busier now, and the credit is the one
+        # element that must stay readable rather than merely visible.
         floor = grey[int(PROBE_H * 0.62) :, :]
         floor_calm = 1.0 - min(1.0, float(floor.std()) / 90.0)
 
@@ -269,6 +291,26 @@ def score_clip(identifier: str, *, probes: int = 5, admit: bool = False) -> Scor
         detail=round(m["detail"], 4),
         total=round(total, 3),
     )
+
+
+# Peak below which a clip is not worth keeping, in dBFS. Stricter than
+# broll.SILENT_DBFS: that one asks whether a track is dead, this asks whether it
+# will still be there after the bed is ducked into the mix.
+AUDIO_FLOOR_DBFS = -18.0
+
+
+def _peak_via_url(url: str, *, start: float = 60.0, secs: float = 45.0) -> float | None:
+    """Loudest sample in a span, measured over the network without downloading
+    the whole film. None means it could not be measured, which is treated as
+    usable — a curator refusing every clip because ffmpeg moved a log line would
+    be a worse outcome than admitting a quiet one."""
+    out = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-nostats", "-ss", f"{start:.0f}", "-t", f"{secs:.0f}",
+         "-i", url, "-vn", "-af", "volumedetect", "-f", "null", os.devnull],
+        capture_output=True, text=True, timeout=240,
+    )
+    m = _re.search(r"max_volume:\s*(-?[\d.]+) dB", out.stderr or "")
+    return float(m.group(1)) if m else None
 
 
 def _duration_via_url(url: str) -> float:

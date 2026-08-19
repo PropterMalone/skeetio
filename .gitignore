@@ -14,3 +14,7 @@ data/
 .skeetio-records/
 __pycache__/
 *.pyc
+
+# Bot runtime artifacts
+bot-cron.log
+.bot-cron.lock

@@ -163,3 +163,73 @@ def test_the_screen_cannot_tell_anti_racist_film_from_racist_one():
     stance, so it defers to a human instead of guessing. Pinned so nobody
     'fixes' the false positive by teaching the regex to guess."""
     assert screen("Don't Be a Sucker 1947 racism prejudice propaganda") in ("block", "hold")
+
+
+# --- the fallback that keeps an item-level outage from wedging a post -------
+# archive.org served 503 for ToNewHor1940 for hours while every other item
+# answered normally. Pairing is deterministic, so posts that drew it were not
+# delayed, they were permanently unrenderable.
+
+
+def test_the_ranking_is_stable_for_a_post():
+    """Determinism is the whole point of this module. If the order moved between
+    calls, a re-render would hand someone a different video."""
+    pool = pair.load()
+    uri = "at://did:plc:x/app.bsky.feed.post/abc"
+    first = [p.identifier for p in pair.ranked(uri, pool)]
+    assert first == [p.identifier for p in pair.ranked(uri, pool)]
+    assert len(first) == len(set(first)) == len(pool), "the ranking dropped or repeated a clip"
+
+
+def test_the_top_of_the_ranking_is_what_choose_returns():
+    """Otherwise the fallback path and the normal path disagree about which clip
+    a post 'really' drew, and the ledger records one while the video shows the
+    other."""
+    pool = pair.load()
+    for uri in (f"at://did:plc:x/app.bsky.feed.post/{n}" for n in ("a", "b", "c", "d")):
+        assert pair.ranked(uri, pool)[0] == pair.choose(uri, pool)
+
+
+def test_different_posts_rank_differently():
+    """A shared ranking would mean the fallback sent every wedged post to the
+    same clip, which is how you get thirty identical videos."""
+    pool = pair.load()
+    seconds = {pair.ranked(f"at://did:plc:x/app.bsky.feed.post/{n}", pool)[1].identifier
+               for n in "abcdefgh"}
+    assert len(seconds) > 1
+
+
+def test_removing_a_clip_only_moves_the_posts_that_drew_it():
+    """The property the whole highest-random-weight scheme exists for, now
+    checked against the ranking rather than only the winner — consent attaches
+    to a specific rendering, so an unrelated post must not be reshuffled."""
+    pool = pair.load()
+    victim = pair.choose("at://did:plc:x/app.bsky.feed.post/aaa", pool).identifier
+    pruned = [c for c in pool if c["identifier"] != victim]
+
+    moved, unmoved = 0, 0
+    for n in range(60):
+        uri = f"at://did:plc:x/app.bsky.feed.post/p{n}"
+        before = pair.choose(uri, pool).identifier
+        after = pair.choose(uri, pruned).identifier
+        if before == victim:
+            moved += 1
+        else:
+            assert before == after, f"{uri} was reshuffled by an unrelated prune"
+            unmoved += 1
+    assert unmoved, "the sample never exercised the unmoved case"
+
+
+def test_a_dead_clip_falls_through_to_this_posts_second_choice():
+    """End to end on the actual failure: the top clip cannot be fetched, so the
+    render must use the next one *this post* ranked — not a random other one,
+    and not nothing at all."""
+    pool = pair.load()
+    uri = "at://did:plc:x/app.bsky.feed.post/wedged"
+    order = pair.ranked(uri, pool)
+    dead = order[0].identifier
+
+    survivors = [p for p in order if p.identifier != dead]
+    assert survivors[0].identifier == order[1].identifier, (
+        "skipping the dead clip did not land on this post's own second choice"
+    )

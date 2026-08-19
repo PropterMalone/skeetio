@@ -14,78 +14,25 @@ first. Text, author, and avatar now arrive together or not at all.
 from __future__ import annotations
 
 import argparse
-import math
+import json
 import sys
+import urllib.error
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from PIL import Image
-
 import broll
 import pair
 import post as P
-from figure import Pose, draw_figure, skin_from_pfp
 from looks import compose
 import exits
-from skeet_frame import CH, CW, Attribution, load_font, unsupported_chars
+from skeet_frame import CH, CW, load_font, unsupported_chars
 
-FIG = (580, 850)
-
-# Two idle cycles on deliberately unrelated periods. A single cycle reads as a
-# mechanism; two that drift against each other read as something alive.
-NOD_PERIOD = 1.70
-BREATHE_PERIOD = 2.55
-CYCLE = 5.10          # lowest common period of the two above
-POSE_STEPS = 40       # poses cached across one cycle, then reused
-BLINK_AT = (0.22, 0.68)   # fractions of the cycle where a blink lands
-BLINK_LEN = 0.05
-
-
-def pose_at(t: float, point: bool) -> Pose:
-    """The pose at fraction `t` through one idle cycle.
-
-    Split out from build_poses so the bounds tests drive the figure through the
-    *same* motion the renderer does. The first version of those tests re-derived
-    this formula, which makes a passing test a statement about the copy rather
-    than about what ships.
-    """
-    nod = math.sin(2 * math.pi * t * CYCLE / NOD_PERIOD)
-    # Antenna follows the *derivative* of the nod, so it trails the head and
-    # overshoots when the head stops. This is the whole liveness trick.
-    nod_vel = math.cos(2 * math.pi * t * CYCLE / NOD_PERIOD)
-    return Pose(
-        nod=nod,
-        breathe=math.sin(2 * math.pi * t * CYCLE / BREATHE_PERIOD),
-        antenna=-nod_vel * 21.0,
-        lean=nod * 1.1,
-        point=138 if point else None,
-        blink=any(b <= t < b + BLINK_LEN for b in BLINK_AT),
-    )
-
-
-def build_poses(pfp, variant: str, point: bool, skin, generic: bool = False) -> list:
-    """Pre-render one cycle of poses. Redrawing the figure per frame would
-    triple render time for motion that repeats anyway."""
-    out = [
-        draw_figure(
-            pfp, FIG, variant=variant, skin=skin, generic=generic,
-            pose=pose_at(i / POSE_STEPS, point),
-        )
-        for i in range(POSE_STEPS)
-    ]
-
-    # Variants leave different amounts of empty margin in the layer, so crop to
-    # actual content. Union across every pose, not per-pose — a bbox that moves
-    # frame to frame would make the creature jitter against the footage.
-    boxes = [p.getbbox() for p in out if p.getbbox()]
-    if boxes:
-        union = (
-            min(b[0] for b in boxes), min(b[1] for b in boxes),
-            max(b[2] for b in boxes), max(b[3] for b in boxes),
-        )
-        out = [p.crop(union) for p in out]
-    return out
+# How far down a post's own clip ranking to walk when archive.org will not serve
+# the ones above. Bounded: past a few, the far end is not having an item-level
+# problem, and hammering it with a fourth 180 MB request will not help.
+CLIP_TRIES = 4
 
 
 def main() -> int:
@@ -100,29 +47,37 @@ def main() -> int:
                          "drawn from the library, or 60s when --clip names one explicitly")
     ap.add_argument("--dur", type=float, default=10.0, help="length in seconds (default 10)")
     ap.add_argument("--fps", type=int, default=24, help="frame rate (default 24)")
-    ap.add_argument("--variant", default="face", choices=["face", "belly", "crab"],
-                    help="where the avatar goes: its head (face), its belly, or a crab's carapace")
-    ap.add_argument("--point", action="store_true",
-                    help="raise the creature's arm toward the text")
     ap.add_argument("--silent", action="store_true", help="drop the archival audio bed")
     ap.add_argument("--generic", action="store_true",
-                    help="palette-only creature, no pfp — for asking before any likeness is used")
+                    help="no likeness at all — a disc keyed to the author's DID instead of their "
+                         "picture, for when you have no permission to use one")
     ap.add_argument("--out", required=True, help="path to write the mp4 to")
+    ap.add_argument("--manifest",
+                    help="write a JSON record of what was rendered — source post, author, clip, "
+                         "in-point. For a caller that needs to log provenance rather than parse "
+                         "this program's stdout.")
     args = ap.parse_args()
 
-    sk = P.fetch(args.post)
-    pfp = P.avatar(sk)
-    if pfp is None:
-        # No avatar set. --generic never shows one, so it proceeds on a
-        # handle-derived palette; every other variant is a picture of their
-        # picture and has nothing to draw.
-        if not args.generic:
-            print(f"@{sk.handle} has no avatar set — use --generic", file=sys.stderr)
-            return exits.NO_AVATAR
-        pfp = Image.new("RGB", (256, 256), (128, 128, 128))
-    # One record, built from the post in a single call. There is deliberately no
-    # path here that names a handle and a body of text separately.
-    quote = Attribution.of(sk)
+    try:
+        sk = P.fetch(args.post)
+        # Words, name and face in one call. There is deliberately no path here
+        # that names a handle, a body of text, or a picture separately.
+        quote = P.quote(sk, likeness=not args.generic)
+    except (urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
+        # Without this the interpreter exits 1, which is in none of the
+        # documented groups — so a bot's tens-digit dispatch has no defined
+        # behaviour and a DNS blip reads as a permanent failure. KeyError and
+        # LookupError are here because a deleted post comes back as a well-formed
+        # response with nothing in it, not as a transport error.
+        print(f"could not read {args.post}: {e}", file=sys.stderr)
+        return exits.FETCH_FAILED
+    if quote.avatar is None and not args.generic:
+        # They have no avatar set, and this run wanted one. --generic is the mode
+        # that was never going to draw their picture, so it is the remediation;
+        # falling through to a blank disc silently would make the no-likeness
+        # mode indistinguishable from a fetch that quietly found nothing.
+        print(f"@{sk.handle} has no avatar set — use --generic", file=sys.stderr)
+        return exits.NO_AVATAR
     print(f"post: @{sk.handle} · {sk.likes} likes")
     # Truncated: the operator needs to confirm they fetched the right post, not
     # to spool a third party's full text into scrollback and any redirected log.
@@ -151,22 +106,48 @@ def main() -> int:
         )
         return exits.UNRENDERABLE_SCRIPT
 
-    # Seed on the DID, not the handle. skin_from_pfp promises "same author, same
-    # creature, every time", and handles change routinely when someone moves to a
-    # custom domain; the DID does not.
-    skin = skin_from_pfp(pfp, seed=sk.did)
-
+    # The clip download is the longest network operation here by a wide margin —
+    # up to ~180 MB from archive.org — and it had nothing around it, so a slow
+    # far end escaped as a traceback and a bare exit 1. That is in none of the
+    # documented groups, which left a caller dispatching on the tens digit with
+    # no defined behaviour for the failure it will see most often.
+    # The clip download is the longest network operation here by a wide margin —
+    # up to ~180 MB from archive.org — and it fails at the level of a single
+    # item: ToNewHor1940 served 503 for hours while every other item answered
+    # normally. Because pairing is deterministic, a post that drew that clip was
+    # not delayed but wedged, so the draw walks down this post's own ranking
+    # until something can actually be fetched.
+    clip = None
     if args.clip:
-        clip = broll.fetch(args.clip, collection=args.collection)
+        try:
+            clip = broll.fetch(args.clip, collection=args.collection)
+        except (urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
+            # No fallback when the operator named the clip. They asked for that
+            # one, and quietly substituting another is not answering the request.
+            print(f"could not fetch {args.clip}: {e}", file=sys.stderr)
+            return exits.CLIP_FETCH_FAILED
         start = args.start if args.start is not None else 60.0
         source = "specified"
     else:
-        pick = pair.choose(sk.uri, pair.load())
-        # Pass the pick's own collection: the pool is a merge, and without this
-        # every clip credited "Prelinger Archives" including NASA footage.
-        clip = broll.fetch(pick.identifier, collection=pick.collection)
-        start = args.start if args.start is not None else pick.start
-        source = "drawn"
+        picks = pair.ranked(sk.uri, pair.load())
+        for n, pick in enumerate(picks[:CLIP_TRIES]):
+            try:
+                # Pass the pick's own collection: the pool is a merge, and
+                # without this every clip credited "Prelinger Archives"
+                # including NASA.
+                clip = broll.fetch(pick.identifier, collection=pick.collection)
+            except (urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
+                print(f"{pick.identifier} unavailable ({type(e).__name__}) — "
+                      f"falling through to the next clip this post ranked",
+                      file=sys.stderr)
+                continue
+            start = args.start if args.start is not None else pick.start
+            source = "drawn" if n == 0 else f"drawn, fallback {n}"
+            break
+        if clip is None:
+            print(f"none of this post's top {CLIP_TRIES} clips could be fetched",
+                  file=sys.stderr)
+            return exits.CLIP_FETCH_FAILED
 
     if not clip.public_domain:
         # Library clips were screened at curation, but --clip takes any
@@ -202,9 +183,8 @@ def main() -> int:
     print(f"clip ({source}): {clip.identifier} · {clip_secs:.0f}s · {clip.title[:44]}")
     print(f"in-point: {start:.1f}s")
 
-    poses = build_poses(pfp, args.variant, args.point, skin, generic=args.generic)
-    print(f"cached {len(poses)} poses over a {CYCLE:.1f}s cycle"
-          f"{' (generic — no likeness used)' if args.generic else ''}")
+    if args.generic:
+        print("generic — no likeness used")
 
     total = int(args.dur * args.fps)
 
@@ -214,9 +194,8 @@ def main() -> int:
             if n >= total:
                 break
             t = n / args.fps
-            idx = int((t % CYCLE) / CYCLE * POSE_STEPS) % POSE_STEPS
             reveal = min(1.0, 0.34 + (t / (args.dur * 0.45)) * 0.66)
-            yield compose(plate, poses[idx], quote, clip.credit_lines, reveal=reveal)
+            yield compose(plate, quote, clip.credit_lines, reveal=reveal)
             if n % 48 == 0:
                 print(f"  frame {n}/{total}", flush=True)
 
@@ -231,6 +210,26 @@ def main() -> int:
     if bed:
         bed.unlink(missing_ok=True)
     print(f"wrote {out} ({out.stat().st_size/1e6:.1f} MB)")
+
+    if args.manifest:
+        # Written last, so its existence means the render finished. A caller
+        # logging provenance needs the source post and the clip, and the only
+        # other way to get them is to scrape this program's stdout — which makes
+        # a print statement part of the contract without anyone deciding that.
+        Path(args.manifest).write_text(json.dumps({
+            "rendered_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "source_uri": sk.uri,
+            "source_cid": sk.cid,
+            "author_did": sk.did,
+            "author_handle": sk.handle,
+            "clip": clip.identifier,
+            "collection": clip.collection,
+            "start": round(start, 2),
+            "dur": args.dur,
+            "generic": bool(args.generic),
+            "out": str(out),
+        }, indent=2))
+        print(f"manifest → {args.manifest}")
     return exits.OK
 
 

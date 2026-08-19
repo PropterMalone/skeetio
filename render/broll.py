@@ -185,6 +185,7 @@ def fetch(
             tmp.replace(dest)
         finally:
             tmp.unlink(missing_ok=True)
+        evict(cache)
 
     year = year_from(md)
     title = md.get("title") or identifier
@@ -243,6 +244,41 @@ def frames(
         p.wait()
 
 
+# Ceiling for the downloaded-footage cache. The whole 38-clip library is about
+# 2 GB at the observed ~48 MB average, so this never fires in normal use — it is
+# a bound, not a policy. Evicting aggressively would be actively worse: pairing
+# is random across the library, so cache hits are the common case, and every
+# miss is a fresh ~48 MB pull from an archive.org that has already proved it
+# will refuse an item for hours at a time.
+CACHE_CAP_BYTES = 4_000_000_000
+
+
+def evict(cache: Path = CACHE, *, cap: int = CACHE_CAP_BYTES) -> list[Path]:
+    """Drop least-recently-used clips until the cache fits under `cap`.
+
+    Least *recently used*, by access time, not by age: a clip that keeps being
+    drawn should survive however old it is, and the one nothing has asked for in
+    weeks is the one to lose. Returns what it removed so a caller can say so.
+    """
+    files = sorted(
+        (p for p in cache.glob("*.mp4") if p.is_file()),
+        key=lambda p: p.stat().st_atime,
+    )
+    total = sum(p.stat().st_size for p in files)
+    dropped = []
+    for p in files:
+        if total <= cap:
+            break
+        size = p.stat().st_size
+        try:
+            p.unlink()
+        except OSError:
+            continue
+        total -= size
+        dropped.append(p)
+    return dropped
+
+
 def has_audio(path: Path) -> bool:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
@@ -250,6 +286,29 @@ def has_audio(path: Path) -> bool:
         capture_output=True, text=True,
     )
     return bool(out.stdout.strip())
+
+
+# Peak below which a track is dead rather than quiet. The usable clips in the
+# library peak between -6 and -10 dBFS; the one that shipped silent peaked at
+# -39.7 across its whole length. -35 sits in a 25 dB gap, so it separates "no
+# sound" from "a quiet passage" without having to guess.
+SILENT_DBFS = -35.0
+
+
+def peak_dbfs(path: Path, *, start: float = 0.0, dur: float | None = None) -> float | None:
+    """Loudest sample in a span, in dBFS. None if it cannot be measured.
+
+    None means "do not know", and callers treat it as usable — refusing on a
+    failed measurement would drop every clip the moment ffmpeg changed its
+    output format, which is a worse failure than the one being prevented.
+    """
+    cmd = ["ffmpeg", "-hide_banner", "-nostats", "-ss", f"{start:.3f}"]
+    if dur is not None:
+        cmd += ["-t", f"{dur:.3f}"]
+    cmd += ["-i", str(path), "-vn", "-af", "volumedetect", "-f", "null", os.devnull]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    m = re.search(r"max_volume:\s*(-?[\d.]+) dB", proc.stderr or "")
+    return float(m.group(1)) if m else None
 
 
 def audio_segment(
@@ -269,6 +328,15 @@ def audio_segment(
     """
     if not has_audio(path):
         return None, "source has no audio track"
+    peak = peak_dbfs(path, start=start, dur=dur)
+    if peak is not None and peak < SILENT_DBFS:
+        # A present-but-silent track. has_audio() only asks whether a stream
+        # exists, and NewOrlea1941 has a perfectly good AAC stream carrying
+        # nothing — so that guard passed and the bot shipped a silent video to a
+        # stranger. The archival sound coming free with the picture is what
+        # closed the silent-video problem; a dead track reopens it while looking
+        # exactly like success.
+        return None, f"source audio is silent ({peak:.0f} dBFS peak)"
     cmd = [
         "ffmpeg", "-v", "error", "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}",
         "-i", str(path), "-vn",

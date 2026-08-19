@@ -16,6 +16,15 @@ post always draws the same clip. That matters more than it sounds. People keep
 these files, a re-render after a code change should not silently hand someone a
 different video, and a bug is impossible to chase if the inputs reshuffle every
 run.
+
+One honest caveat on that determinism, added 2026-08-19. `ranked()` orders the
+whole pool, and the renderer walks down it when a clip cannot be fetched — so a
+post whose first choice is unavailable renders with its second, and a re-render
+after that item comes back would return to the first. The ordering is pure; what
+varies is the far end. The published artifact is still exact, because the ledger
+and the manifest both record the identifier actually used; it is *re-derivation*
+that is best-effort, not provenance. The alternative was worse: an item-level
+outage at archive.org left the affected posts permanently unrenderable.
 """
 
 from __future__ import annotations
@@ -84,8 +93,8 @@ def load(*paths: Path) -> list[dict]:
     return list(pool.values())
 
 
-def choose(post_uri: str, pool: list[dict], *, jitter: float = 25.0) -> Pick:
-    """Draw a clip and an in-point for this post.
+def _pick(post_uri: str, clip: dict, jitter: float) -> Pick:
+    """One clip's Pick, with its in-point.
 
     The in-point wanders around the window the curator liked rather than sitting
     exactly on it: two posts drawing the same clip should not open on the same
@@ -96,22 +105,38 @@ def choose(post_uri: str, pool: list[dict], *, jitter: float = 25.0) -> Pick:
     lives in the caller (make_video, against broll.duration). Said "clamped" flatly
     before, and a caller who trusted that gets a silently short or empty video.
     """
-    if not pool:
-        raise LookupError("empty b-roll pool — run render/curate.py first")
-
-    # Highest-random-weight, not an index into the pool. rng.choice(pool) draws
-    # from the pool's *length*, so adding or removing a single clip remaps
-    # nearly every post — and this pool gets pruned, most recently to take
-    # internment propaganda out of it. That would have silently changed the
-    # video an approved beta subject had already agreed to.
-    #
-    # Scoring each clip independently means a post's pick only moves if the clip
-    # it drew is the one that left, or a new clip happens to outscore it. Nothing
-    # else in the library can disturb it.
-    clip = max(pool, key=lambda c: _weight(post_uri, c["identifier"]))
     rng = _seeded(f"{post_uri}\x00{clip['identifier']}")
     start = max(8.0, clip["best_start"] + rng.uniform(-jitter, jitter))
     return Pick(
         clip["identifier"], clip["title"], clip.get("year"), round(start, 1),
         clip.get("collection", "prelinger"),
     )
+
+
+def ranked(post_uri: str, pool: list[dict], *, jitter: float = 25.0) -> list[Pick]:
+    """Every clip, in this post's own order of preference.
+
+    Highest-random-weight, not an index into the pool. rng.choice(pool) draws
+    from the pool's *length*, so adding or removing a single clip remaps nearly
+    every post — and this pool gets pruned, most recently to take internment
+    propaganda out of it. That would have silently changed the video an approved
+    beta subject had already agreed to.
+
+    Scoring each clip independently means a post's order only moves where the
+    library actually changed. Nothing else can disturb it.
+
+    The whole ranking rather than just the winner, because archive.org fails at
+    the level of a single item: `ToNewHor1940` served 503 for hours while every
+    other item answered normally. Pairing is deterministic, so without a fallback
+    the posts that drew that clip were not delayed, they were wedged — permanently
+    unrenderable through no fault of the request.
+    """
+    if not pool:
+        raise LookupError("empty b-roll pool — run render/curate.py first")
+    ordered = sorted(pool, key=lambda c: _weight(post_uri, c["identifier"]), reverse=True)
+    return [_pick(post_uri, c, jitter) for c in ordered]
+
+
+def choose(post_uri: str, pool: list[dict], *, jitter: float = 25.0) -> Pick:
+    """The clip this post draws, absent any reason it cannot be used."""
+    return ranked(post_uri, pool, jitter=jitter)[0]

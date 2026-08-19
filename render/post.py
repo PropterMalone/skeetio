@@ -24,6 +24,8 @@ from dataclasses import dataclass
 
 from PIL import Image
 
+from skeet_frame import Attribution
+
 APPVIEW = "https://public.api.bsky.app/xrpc"
 UA = {"User-Agent": "skeetio/0.1"}
 
@@ -83,6 +85,19 @@ def _get(endpoint: str, **params) -> dict:
         return json.load(r)
 
 
+def resolve_actor(actor: str) -> str:
+    """A handle or DID to a DID.
+
+    Anything that must still refer to the same person tomorrow is keyed on the
+    DID — takedown authority above all. Handles change routinely when someone
+    moves to a custom domain, and a permission check that silently stops
+    matching after a rename is worse than one that never worked.
+    """
+    if actor.startswith("did:"):
+        return actor
+    return _get("com.atproto.identity.resolveHandle", handle=actor.lstrip("@"))["did"]
+
+
 def resolve(ref: str) -> str:
     """Turn a bsky.app URL or at:// URI into a canonical at:// URI."""
     if m := AT_URI.search(ref):
@@ -92,10 +107,7 @@ def resolve(ref: str) -> str:
     else:
         raise ValueError(f"not a recognisable post reference: {ref!r}")
 
-    did = actor if actor.startswith("did:") else _get(
-        "com.atproto.identity.resolveHandle", handle=actor
-    )["did"]
-    return f"at://{did}/app.bsky.feed.post/{rkey}"
+    return f"at://{resolve_actor(actor)}/app.bsky.feed.post/{rkey}"
 
 
 def fetch(ref: str) -> Post:
@@ -180,3 +192,20 @@ def avatar(post: Post) -> Image.Image | None:
     if len(buf) > MAX_AVATAR_BYTES:
         raise ValueError(f"avatar exceeds {MAX_AVATAR_BYTES} bytes — refusing to decode")
     return Image.open(io.BytesIO(buf)).convert("RGB")
+
+
+def quote(post: Post, *, likeness: bool = True) -> Attribution:
+    """The renderer's whole input: words, name and face, fetched as one call.
+
+    This is the module docstring's promise made literal. `Attribution.of` takes
+    the avatar as a second argument because the pure module cannot fetch one,
+    which leaves `of(post_a, avatar_b)` expressible — so the real path does not
+    go through it. Callers ask for a quote and get a bound record; there is no
+    supported way to hand the renderer a picture of one person and the words of
+    another.
+
+    `likeness=False` is --generic: no avatar is fetched at all, rather than one
+    being fetched and then not drawn. The distinction matters — it means the
+    no-permission mode makes no request for the picture it will not use.
+    """
+    return Attribution.of(post, avatar(post) if likeness else None)

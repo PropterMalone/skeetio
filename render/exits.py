@@ -47,6 +47,8 @@ EMPTY_POST_TEXT = 32
 
 # 4x — the far end
 UPLOAD_REFUSED = 40
+FETCH_FAILED = 41
+CLIP_FETCH_FAILED = 42
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,13 @@ CONTRACT: tuple[Exit, ...] = (
          "operator error; alert a human"),
     Exit(UPLOAD_REFUSED, "UPLOAD_REFUSED", "the video service refused the upload",
          "retry later unchanged; usually a rate or quota limit"),
+    Exit(FETCH_FAILED, "FETCH_FAILED",
+         "could not reach Bluesky to read the post, or it has been deleted",
+         "retry later unchanged; if it keeps failing the post is probably gone"),
+    Exit(CLIP_FETCH_FAILED, "CLIP_FETCH_FAILED",
+         "could not fetch the archival clip from archive.org",
+         "retry later unchanged. Pairing is deterministic, so a clip that stays "
+         "unreachable wedges this one post — prune it from the library"),
 )
 
 BY_CODE = {e.code: e for e in CONTRACT}

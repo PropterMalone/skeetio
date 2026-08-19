@@ -2,10 +2,10 @@
 
 Renders a Bluesky post to a 9:16 short.
 
-Give it a post URL. It fetches the text and the author's avatar, builds a small
-posable creature that wears that avatar as its face, stands it in front of
-public-domain archival footage, sets the post in large serif type, and muxes the
-whole thing to an mp4 that Bluesky, Shorts, Reels and TikTok will all accept.
+Give it a post URL. It fetches the text and the author's avatar, sets the post
+in large serif type over public-domain archival footage, puts the author's
+picture and handle in the corner, and muxes the whole thing to an mp4 that
+Bluesky, Shorts, Reels and TikTok will all accept.
 
 The audio is the archival clip's own soundtrack.
 
@@ -34,10 +34,15 @@ you to.** Someone requests a video of their own post, and consent is inherent in
 the request: no gesture to interpret, no like to poll, no revocation ambiguity,
 and no likeness question, because they handed you their own avatar.
 
-If you want third-party nomination, return the render **to the nominator** and
-let them share it with the author themselves. A person telling their friend
-"look what I made of your post" is ordinary; the identical message from a bot is
-solicitation.
+For third-party nomination, the answer goes **to the nominator** — it hangs
+under *their* request, not under the post it was made from, and the author of
+that post is not notified. Be precise about what that does and does not buy:
+the reply still belongs to the original thread, so the video is visible to
+anyone reading it. It is delivered to the person who asked; it is not hidden
+from the person it is about, and it should not be sold as if it were.
+
+The bot never messages an author, never asks them for anything, and never posts
+anywhere except under a request addressed to it.
 
 Two things worth knowing if you go further than that:
 
@@ -45,9 +50,9 @@ Two things worth knowing if you go further than that:
   Commissioned avatars and professional headshots are everywhere, and the person
   you are asking may hold only the right to use the image *as an avatar*. They
   can say yes in complete good faith and still not have the right they granted.
-- `--generic` renders the creature with the author's *palette* and no avatar at
-  all. That is personalised without being a likeness, and it is what you send
-  when you have no permission yet.
+- `--generic` draws a disc keyed to the author's DID instead of their picture,
+  and fetches no avatar at all. That is personalised without being a likeness,
+  and it is what you send when you have no permission yet.
 
 ## Install
 
@@ -69,11 +74,12 @@ python3 -m pytest -q tests
 
 There is no CI, so these run when someone runs them. They are worth running
 before you change anything in `render/`: they pin the invariants this project
-got wrong at least once each — that the creature is not cut off by its own
-layer or by the frame, that the credit lands inside the safe area and only
-claims public domain when the licence says so, that excluded clips cannot
-re-enter the pool, that the tofu guard fails closed, and that a post's words
-and its author cannot be passed around separately.
+got wrong at least once each — that the credit lands inside the safe area,
+stays inside its own column and only claims public domain when the licence says
+so, that excluded clips cannot re-enter the pool, that the tofu guard fails
+closed, that `--generic` reaches the finished frame carrying no pixel of anyone's
+picture, and that a post's words, its author and their face cannot be passed
+around separately.
 
 Each test's docstring says which bug it exists to catch. If one fails, read
 that before assuming the test is stale.
@@ -90,12 +96,8 @@ Useful flags:
 
 | flag | effect |
 | --- | --- |
-| `--variant face` | the avatar *is* the creature's head (default) |
-| `--variant belly` | the creature keeps its own eyes, avatar rides on its belly |
-| `--generic` | palette-derived creature, no avatar — no likeness used |
-| `--point` | raises an arm toward the text |
+| `--generic` | a DID-keyed disc instead of the avatar — no likeness used |
 | `--silent` | drop the archival audio bed |
-| `--variant crab` | the pfp becomes a crab's carapace, eyestalks and all |
 | `--dur` / `--fps` | length and frame rate (default 10s, 24fps) |
 
 Build your own b-roll library:
@@ -121,10 +123,65 @@ BSKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
 
 Use an [app password](https://bsky.app/settings/app-passwords), never your account password.
 
+## The bot
+
+`render/bot.py` answers people who ask. The mechanic is the established one:
+
+```
+A       someone's post
+└ R     a reply naming the bot
+  └ …   the bot's answer, hanging under R
+```
+
+It only ever acts on a request, and its answer goes under **the request** — so
+where a stranger asks about someone else's post, the video is delivered to the
+person who asked rather than into the author's mentions. The bot never
+approaches anyone first.
+
+```
+python3 render/bot.py --env .env --expect-account yourbot.bsky.social --once
+```
+
+`--once` is a single pass, for cron. Without it the bot loops on `--interval`
+seconds. `--dry-run` renders and decides everything but publishes nothing and
+deletes nothing, which is how to watch what it *would* do against a live
+account. Pass `--expect-account` from the first run rather than adding it after
+something goes wrong: it binds the run to one handle and refuses otherwise.
+
+### Taking a video down
+
+Reply to one of the bot's videos and ask:
+
+```
+@yourbot.bsky.social remove
+```
+
+Two people can do this and nobody else: **the author of the post that was
+rendered**, and **whoever asked for it**. Anyone else is ignored silently —
+telling a stranger they are not allowed to delete something invites them to work
+out who is.
+
+Operators have `render/retract.py` as a backstop, for when the bot is not
+running or the record predates the ledger:
+
+```
+python3 render/retract.py --env .env --source someone.bsky.social --dry-run
+python3 render/retract.py --env .env --reply-to at://…/app.bsky.feed.post/abc
+```
+
+`--source` answers "take down everything of mine". It resolves the handle to a
+DID first, because the ledger is keyed on DIDs — a takedown that misses because
+somebody moved to a custom domain is not a takedown.
+
+The ledger lives at `~/.local/state/skeetio/ledger.jsonl`, mode 0600. It is
+append-only, it is the only link between a published video and the request
+behind it, and it cannot be regenerated. Back it up or accept that a lost ledger
+means the in-thread removal path stops working for everything already posted.
+
 ## Exit codes
 
-Both CLIs are meant to be driven by something automated, and for that caller the
-exit code is the whole failure channel — it never sees the stderr you read. So
+These CLIs are meant to be driven by something automated — `bot.py` drives two
+of them — and for that caller the exit code is the whole failure channel — it never sees the stderr you read. So
 the codes are an API, defined once in `render/exits.py`, and the tens digit
 carries the action:
 
@@ -140,6 +197,8 @@ carries the action:
 | `31` | `IDENTITY_MISMATCH` | `--expect-account` does not match `--env` | operator error; alert a human |
 | `32` | `EMPTY_POST_TEXT` | `--create-post` with no `--text` | operator error; alert a human |
 | `40` | `UPLOAD_REFUSED` | the video service refused the upload | retry later unchanged; usually a quota limit |
+| `41` | `FETCH_FAILED` | could not reach Bluesky to read the post, or it is deleted | retry later unchanged; if it persists the post is gone |
+| `42` | `CLIP_FETCH_FAILED` | could not fetch the archival clip from archive.org | retry later; if it persists, prune that clip from the library |
 
 `1x` is permanent, `2x` is worth retrying with the named change, `3x` means your
 configuration is wrong, `4x` means the far end said no. **Never retry around a
@@ -162,7 +221,8 @@ that actually matter for compositing:
 - **motion** — does the shot go anywhere
 - **detail** — edge energy, as a proxy for eye-catching
 - **brightness fit** — dark plates die under a scrim, bright ones eat the type
-- **floor calm** — the bottom third carries the figure, so it should be quiet there
+- **floor calm** — the bottom third carries the author's picture, handle and the
+  credit line, so it should be quiet there
 
 It deliberately does **not** score on colour. The earnest mid-century monochrome
 instructional films are most of the charm and should not be penalised for being
@@ -205,11 +265,16 @@ specifically.
 
 Kept here because they cost time and are not obvious.
 
-**A floating avatar disc cannot nod.** The first version put the profile picture
+**A floating avatar disc cannot nod.** An early version put the profile picture
 in a circle and translated it up and down. A disc can only translate, so a nod is
 a few pixels of vertical travel that read as a compression artifact at any size.
-Giving the avatar a *body* is what fixed it — a body can bob, lean, squash, and
-it has an arm to point with. `figure.py`.
+Giving the avatar a *body* fixed that — a body can bob, lean, squash, and has an
+arm to point with.
+
+The creature is nonetheless **parked**: the picture is currently static in the
+bottom-left corner and nothing tries to animate it. The finding above still
+stands and is the reason there is no *animated* disc. If the creature comes
+back, this is the constraint it has to beat.
 
 **The background does not have to be relevant, it has to move.** This is the
 karaoke-video principle: motion holds the eye long enough to finish reading.
@@ -253,17 +318,21 @@ Nine modules in `render/`, in roughly the order a render moves through them:
   it, lifts the audio bed, and owns the public-domain licence rule.
 - `curate.py` — offline tool that builds the clip library: scores candidates for
   motion and legibility, and screens them for subject and licence.
-- `figure.py` — the posable creature carrying the author's avatar. `skin_from_pfp`
-  derives its palette from that avatar; `--generic` uses the palette and no
-  likeness at all.
 - `skeet_frame.py` — paragraph wrapping and binary-search type fitting, the safe
   area, and the guard that refuses scripts the bundled fonts cannot draw.
-- `looks.py` — assembles a frame: scrim, haloed type, contact shadow, creature,
-  credit.
+- `looks.py` — assembles a frame: scrim, haloed type, the author's picture and
+  handle bottom-left, credit.
 - `make_video.py` — the CLI. Ties the above together and encodes the mp4.
 - `publish.py` — uploads to Bluesky as a native video blob. Does **not** post;
   `--create-post` is opt-in, because a post is an outbound message.
 - `exits.py` — the exit-code contract above.
+- `bot.py` — watches for mentions, renders what was asked for, replies to the
+  asker. Shells out to the two CLIs above rather than importing them; the exit
+  code is its whole failure channel.
+- `ledger.py` — append-only record of what was rendered for whom and where it
+  was posted. Keyed on DID. The thing that makes a takedown possible.
+- `retract.py` — operator-side removal. The route a person uses is a reply to
+  the video itself.
 
 ## Layout notes
 

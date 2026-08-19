@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import exits  # noqa: E402
+import post  # noqa: E402
 
 PDS = "https://bsky.social"
 VIDEO = "https://video.bsky.app"
@@ -46,6 +47,21 @@ def read_env(path: Path) -> dict[str, str]:
         k, v = line.split("=", 1)
         out[k.strip()] = v.strip().strip("'\"")
     return out
+
+
+class ApiError(RuntimeError):
+    """A non-2xx from an XRPC call, carrying the parts a caller needs to decide.
+
+    _req used to raise a bare RuntimeError with everything formatted into the
+    message, so the only way to branch on a status was to match text — and the
+    one place that tried instead caught urllib's HTTPError, which _req never
+    lets out. That made the whole "already exists means it worked" path
+    unreachable, which is the path the no-double-post guarantee rests on.
+    """
+
+    def __init__(self, method: str, path: str, code: int, body: str):
+        self.code, self.body = code, body
+        super().__init__(f"{method} {path} -> {code}: {body[:400]}")
 
 
 def _req(url: str, *, method: str = "GET", token: str | None = None,
@@ -74,9 +90,7 @@ def _req(url: str, *, method: str = "GET", token: str | None = None,
         if parsed is not None:
             return parsed
         # Never echo the request body — it may carry credentials.
-        raise RuntimeError(
-            f"{method} {urllib.parse.urlsplit(url).path} -> {e.code}: {raw[:400]}"
-        ) from None
+        raise ApiError(method, urllib.parse.urlsplit(url).path, e.code, raw) from None
 
 
 def probe_dimensions(video: Path, fallback_w: int, fallback_h: int) -> tuple[int, int]:
@@ -198,7 +212,20 @@ def main() -> int:
     ap.add_argument("--video", required=True)
     ap.add_argument("--env", required=True, help=".env holding BSKY_IDENTIFIER / BSKY_APP_PASSWORD")
     ap.add_argument("--alt", default="", help="alt text for the video (strongly encouraged)")
+    ap.add_argument("--alt-file",
+                    help="read alt text from a file instead of the command line. Preferred for "
+                         "anything derived from a post: the text is someone else's and may open "
+                         "with a dash, which argparse eats.")
     ap.add_argument("--text", default="", help="post text, only used with --create-post")
+    ap.add_argument("--allow-empty-text", action="store_true",
+                    help="publish with no post text. The video is the whole payload — a caption "
+                         "would be this program talking. Explicit so it cannot happen by accident.")
+    ap.add_argument("--reply-to",
+                    help="bsky.app URL or at:// URI of a post to reply to")
+    ap.add_argument("--rkey",
+                    help="record key to publish under. Deriving it from something stable about "
+                         "the request makes createRecord idempotent, so a crash between posting "
+                         "and recording cannot produce a second post on retry.")
     ap.add_argument("--width", type=int, default=1080,
                     help="fallback width if ffprobe cannot read the file")
     ap.add_argument("--height", type=int, default=1920,
@@ -239,6 +266,23 @@ def main() -> int:
             file=sys.stderr,
         )
 
+    alt = args.alt
+    if args.alt_file:
+        alt = Path(args.alt_file).expanduser().read_text().strip()
+
+    # Resolved before the upload, not after. A post that vanished between the
+    # request and now is the consent case, not an error case — someone deleted
+    # what we were about to answer — and finding that out after pushing a video
+    # blob to their PDS is finding out too late.
+    reply = None
+    if args.reply_to:
+        try:
+            reply = post.fetch(args.reply_to).thread_refs
+        except (urllib.error.URLError, TimeoutError, OSError, KeyError, LookupError) as e:
+            print(f"could not read the post to reply to ({args.reply_to}): {e}", file=sys.stderr)
+            return exits.FETCH_FAILED
+        print(f"replying to: {args.reply_to}")
+
     mb = video.stat().st_size / 1e6
     width, height = probe_dimensions(video, args.width, args.height)
     print(f"video: {video.name}  {mb:.1f} MB  {width}x{height}")
@@ -276,8 +320,9 @@ def main() -> int:
             "$type": "app.bsky.embed.video",
             "video": blob,
             "aspectRatio": {"width": width, "height": height},
-            **({"alt": args.alt} if args.alt else {}),
+            **({"alt": alt} if alt else {}),
         },
+        **({"reply": reply} if reply else {}),
     }
 
     # Beside the video, but not *next to* it in the sense that matters: these
@@ -296,17 +341,35 @@ def main() -> int:
         print("To publish, re-run the same command with --create-post and --text \"...\"")
         return exits.OK
 
-    if not args.text.strip():
-        print("refusing to publish an empty post; pass --text", file=sys.stderr)
+    if not args.text.strip() and not args.allow_empty_text:
+        print("refusing to publish an empty post; pass --text or --allow-empty-text",
+              file=sys.stderr)
         return exits.EMPTY_POST_TEXT
 
-    res = _req(
-        f"{PDS}/xrpc/com.atproto.repo.createRecord",
-        method="POST", token=sess["accessJwt"], ctype="application/json",
-        body=json.dumps({"repo": did, "collection": "app.bsky.feed.post", "record": record}).encode(),
-    )
+    body = {"repo": did, "collection": "app.bsky.feed.post", "record": record}
+    if args.rkey:
+        body["rkey"] = args.rkey
+    try:
+        res = _req(
+            f"{PDS}/xrpc/com.atproto.repo.createRecord",
+            method="POST", token=sess["accessJwt"], ctype="application/json",
+            body=json.dumps(body).encode(),
+        )
+    except ApiError as e:
+        detail = e.body
+        if args.rkey and ("already exists" in detail.lower() or e.code == 409):
+            # The point of passing --rkey. A retry after a crash between posting
+            # and recording lands here rather than posting a second copy, so the
+            # caller can treat "already there" as the success it actually is.
+            uri = f"at://{did}/app.bsky.feed.post/{args.rkey}"
+            print(f"already posted (idempotent on rkey): {uri}")
+            return exits.OK
+        print(f"createRecord refused: {e.code} {detail}", file=sys.stderr)
+        return exits.UPLOAD_REFUSED
     rkey = res["uri"].rsplit("/", 1)[-1]
     print(f"posted: https://bsky.app/profile/{ident}/post/{rkey}")
+    print(f"uri: {res['uri']}")
+    print(f"cid: {res.get('cid', '')}")
     return exits.OK
 
 

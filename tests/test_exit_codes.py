@@ -27,7 +27,7 @@ sys.path.insert(0, str(RENDER))
 
 import exits  # noqa: E402
 
-CLIS = ("make_video.py", "publish.py")
+CLIS = ("make_video.py", "publish.py", "retract.py", "bot.py")
 
 
 def _returned_exit_names(module: str) -> set[str]:

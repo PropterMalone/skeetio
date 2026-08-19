@@ -48,11 +48,15 @@ class Author:
     display_name: str
     handle: str
     followers: int | None = None
+    # Seed for anything that must look the same for the same person every time.
+    # The DID and not the handle, because handles change routinely when someone
+    # moves to a custom domain and the DID does not.
+    did: str | None = None
 
 
 @dataclass(frozen=True)
 class Attribution:
-    """Someone's words together with whose they are.
+    """Someone's words, whose they are, and their face — as one record.
 
     This exists so that no function anywhere takes the words and the name as two
     separate arguments. An earlier make_video took --handle and --text
@@ -61,21 +65,33 @@ class Attribution:
     fixed that at the fetch boundary and compose() quietly reintroduced it, one
     loose parameter each.
 
-    Build it with `of()`, which takes the whole post record and is the only
-    supported way in. Do not add a constructor that accepts a bare handle.
+    The avatar belongs here for the same reason and was added when the creature
+    was parked: drawing the picture means compose() needs it, and a picture
+    passed beside the name is the identical hazard one layer down — the wrong
+    face under the right handle. Prefer `post.quote()`, which fetches all three
+    together and is the only construction site on the real path.
+
+    `avatar is None` means *no likeness on purpose* — the --generic case. It
+    never means the fetch failed; make_video refuses that separately, so a None
+    reaching here is always a decision someone made.
     """
 
     text: str
     author: Author
+    avatar: Image.Image | None = None
 
     @classmethod
-    def of(cls, post) -> Attribution:
+    def of(cls, post, avatar: Image.Image | None = None) -> Attribution:
         """From a post record — anything carrying text, display_name and handle.
 
         Duck-typed rather than importing post.Post, which would make this
         filesystem- and network-adjacent module a dependency of the pure one.
         """
-        return cls(post.text, Author(post.display_name, post.handle))
+        return cls(
+            post.text,
+            Author(post.display_name, post.handle, did=getattr(post, "did", None)),
+            avatar,
+        )
 
 
 @functools.lru_cache(maxsize=64)

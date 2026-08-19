@@ -19,6 +19,16 @@
       "identifier": "panorama_ephemera2004",
       "reason": "licence CC BY-NC-SA 4.0, not public domain",
       "decision": "settled by licence policy, not judgment \u2014 the renderer refuses non-public-domain clips"
+    },
+    {
+      "identifier": "OneGotFa1963",
+      "reason": "audio too quiet (-20.2 dBFS peak)",
+      "decision": "excluded 2026-08-19 \u2014 survives the renderer's -35 dBFS correctness floor, but the bed is ducked another 6 dB on the way in, so it lands near -26 dB in the mix: audible in theory, inaudible on a phone."
+    },
+    {
+      "identifier": "NewOrlea1941",
+      "reason": "audio dead (-48 dBFS peak over the span a render uses)",
+      "decision": "excluded 2026-08-19 \u2014 shipped a silent video to a stranger's request. The archival sound arriving free with the picture is what closed the silent-video problem; a dead track reopens it while looking like success."
     }
   ]
 }
